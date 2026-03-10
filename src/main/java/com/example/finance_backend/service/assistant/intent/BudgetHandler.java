@@ -100,8 +100,8 @@ public class BudgetHandler extends BaseIntentHandler {
         LocalDate now = LocalDate.now();
         LocalDate startDate = now.with(TemporalAdjusters.firstDayOfMonth());
         if (pending.month != null) {
-             LocalDate d = dateParser.parseDate(pending.month, now);
-             if (d != null) startDate = d.with(TemporalAdjusters.firstDayOfMonth());
+            LocalDate d = dateParser.parseDate(pending.month, now);
+            if (d != null) startDate = d.with(TemporalAdjusters.firstDayOfMonth());
         }
         LocalDate endDate = startDate.with(TemporalAdjusters.lastDayOfMonth());
 
@@ -118,9 +118,9 @@ public class BudgetHandler extends BaseIntentHandler {
         String catName = categoryRepository.findById(categoryId).map(c -> c.getName()).orElse("");
         return AiAssistantResponse.builder()
                 .intent(intentStr).refreshRequired(true)
-                .reply(responseGenerator.t(language, 
-                    String.format("Đã thiết lập %s cho %s: %s (%s - %s).", type == EntryType.INCOME ? "mục tiêu thu" : "hạn mức chi", catName, responseGenerator.formatVnd(pending.amount, language), startDate, endDate),
-                    String.format("Set %s for %s: %s (%s - %s).", type == EntryType.INCOME ? "income target" : "budget", catName, responseGenerator.formatVnd(pending.amount, language), startDate, endDate)))
+                .reply(responseGenerator.t(language,
+                        String.format("Đã thiết lập %s cho %s: %s (%s - %s).", type == EntryType.INCOME ? "mục tiêu thu" : "hạn mức chi", catName, responseGenerator.formatVnd(pending.amount, language), startDate, endDate),
+                        String.format("Set %s for %s: %s (%s - %s).", type == EntryType.INCOME ? "income target" : "budget", catName, responseGenerator.formatVnd(pending.amount, language), startDate, endDate)))
                 .build();
     }
 }
