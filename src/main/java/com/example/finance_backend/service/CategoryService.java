@@ -123,4 +123,31 @@ public class CategoryService {
         return CategoryDto.fromEntity(c);
     }
 
-   
+    @Transactional
+    public void deleteById(Long id) {
+        Category categoryToDelete = categoryRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Category not found"));
+
+        if ("Khác".equalsIgnoreCase(categoryToDelete.getName()) || "Khác (Thu nhập)".equalsIgnoreCase(categoryToDelete.getName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                responseGenerator.t(getLang(), "Không thể xóa danh mục mặc định.", "Cannot delete the default category.", "既定のカテゴリを削除することはできません。", "기본 카테고리를 삭제할 수 없습니다.", "无法删除默认类别。"));
+        }
+
+        EntryType deletedType = categoryToDelete.getType();
+        String fallbackName = deletedType == EntryType.INCOME ? "Khác (Thu nhập)" : "Khác";
+
+        Category fallbackCategory = categoryRepository.findByNameIgnoreCase(fallbackName)
+                .orElseGet(() -> categoryRepository.save(Category.builder()
+                        .name(fallbackName)
+                        .type(deletedType)
+                        .iconName(deletedType == EntryType.INCOME ? "attach_money" : "category")
+                        .colorHex(deletedType == EntryType.INCOME ? "4CAF50" : "009688")
+                        .build()));
+
+        financialEntryRepository.updateCategoryId(id, fallbackCategory.getId());
+        scheduleRepository.updateCategoryId(id, fallbackCategory.getId());
+
+        categoryRepository.deleteById(id);
+        invalidateCache();
+    }
+}
