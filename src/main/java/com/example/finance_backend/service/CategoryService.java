@@ -22,8 +22,13 @@ public class CategoryService {
                 .collect(Collectors.toList());
     }
 
-    public Map<Long, String> getIdToNameMap() {
-        return categoryRepository.findAll().stream()
-                .collect(Collectors.toMap(Category::getId, Category::getName));
+    private Map<Long, String> idToNameMapCache;
+
+    public synchronized Map<Long, String> getIdToNameMap() {
+        if (idToNameMapCache == null) {
+            idToNameMapCache = categoryRepository.findAll().stream()
+                    .collect(Collectors.toMap(Category::getId, Category::getName));
+        }
+        return idToNameMapCache;
     }
 }

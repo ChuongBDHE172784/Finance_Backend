@@ -24,9 +24,12 @@ public class CreateEntryRequest {
     @NotNull
     private Long categoryId;
 
-    private LocalDate transactionDate; // null = today
+    @NotNull(message = "Transaction date is required")
+    private LocalDate transactionDate;
 
+    @jakarta.validation.constraints.Size(max = 20, message = "Quá nhiều tags")
     private List<String> tags;
+    @jakarta.validation.constraints.Size(max = 20, message = "Quá nhiều mentions")
     private List<String> mentions;
     private String imageUrl;
     private Double latitude;

@@ -48,9 +48,26 @@ public class FinancialEntryController {
         return ResponseEntity.status(HttpStatus.CREATED).body(entryService.create(request));
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<FinancialEntryDto> update(@PathVariable Long id, @Valid @RequestBody CreateEntryRequest request) {
+        return ResponseEntity.ok(entryService.update(id, request));
+    }
+
+    @PostMapping("/{id}/image")
+    public ResponseEntity<FinancialEntryDto> uploadImage(
+            @PathVariable Long id,
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return ResponseEntity.ok(entryService.uploadImage(id, file));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         entryService.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleIllegalArgumentException(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(e.getMessage());
     }
 }
