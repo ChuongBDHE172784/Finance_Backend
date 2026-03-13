@@ -3,8 +3,11 @@ package com.example.finance_backend.service;
 import com.example.finance_backend.dto.CreateEntryRequest;
 import com.example.finance_backend.dto.FinancialEntryDto;
 import com.example.finance_backend.entity.EntrySource;
+import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.entity.FinancialEntry;
+import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.FinancialEntryRepository;
+import com.example.finance_backend.repository.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +22,7 @@ import java.util.stream.Collectors;
 public class FinancialEntryService {
 
     private final FinancialEntryRepository entryRepository;
+    private final AccountRepository accountRepository;
     private final CategoryService categoryService;
 
     @Transactional(readOnly = true)
@@ -57,13 +61,20 @@ public class FinancialEntryService {
         if (!categoryService.getIdToNameMap().containsKey(req.getCategoryId())) {
             throw new IllegalArgumentException("Unknown Category ID: " + req.getCategoryId());
         }
+        Account account = accountRepository.findById(req.getAccountId())
+                .orElseThrow(() -> new IllegalArgumentException("Account not found"));
+
+        EntryType type = EntryType.valueOf(req.getType().toUpperCase());
         LocalDate date = req.getTransactionDate();
         EntrySource source = parseSource(req.getSource());
 
         FinancialEntry e = FinancialEntry.builder()
+                .type(type)
                 .amount(req.getAmount())
                 .note(req.getNote())
                 .categoryId(req.getCategoryId())
+                .accountId(req.getAccountId())
+                .toAccountId(req.getToAccountId())
                 .transactionDate(date)
                 .tags(join(req.getTags()))
                 .mentions(join(req.getMentions()))
@@ -72,6 +83,15 @@ public class FinancialEntryService {
                 .longitude(req.getLongitude())
                 .source(source != null ? source : EntrySource.MANUAL)
                 .build();
+        
+        // Update account balance
+        if (type == EntryType.INCOME) {
+            account.setBalance(account.getBalance().add(req.getAmount()));
+        } else if (type == EntryType.EXPENSE) {
+            account.setBalance(account.getBalance().subtract(req.getAmount()));
+        }
+        accountRepository.save(account);
+
         e = entryRepository.save(e);
         String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
         return FinancialEntryDto.fromEntity(e, catName);
@@ -85,11 +105,36 @@ public class FinancialEntryService {
         FinancialEntry e = entryRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Entry not found"));
         
+        Account oldAccount = accountRepository.findById(e.getAccountId())
+                .orElseThrow(() -> new IllegalArgumentException("Old account not found"));
+        
+        // Revert old balance
+        if (e.getType() == EntryType.INCOME) {
+            oldAccount.setBalance(oldAccount.getBalance().subtract(e.getAmount()));
+        } else if (e.getType() == EntryType.EXPENSE) {
+            oldAccount.setBalance(oldAccount.getBalance().add(e.getAmount()));
+        }
+        accountRepository.save(oldAccount);
+
+        // Apply new balance
+        Account newAccount = accountRepository.findById(req.getAccountId())
+                .orElseThrow(() -> new IllegalArgumentException("New account not found"));
+        
+        EntryType newType = EntryType.valueOf(req.getType().toUpperCase());
+        if (newType == EntryType.INCOME) {
+            newAccount.setBalance(newAccount.getBalance().add(req.getAmount()));
+        } else if (newType == EntryType.EXPENSE) {
+            newAccount.setBalance(newAccount.getBalance().subtract(req.getAmount()));
+        }
+        accountRepository.save(newAccount);
+
         EntrySource source = parseSource(req.getSource());
 
         e.setAmount(req.getAmount());
         e.setNote(req.getNote());
         e.setCategoryId(req.getCategoryId());
+        e.setAccountId(req.getAccountId());
+        e.setType(newType);
         e.setTransactionDate(req.getTransactionDate());
         e.setTags(join(req.getTags()));
         e.setMentions(join(req.getMentions()));
@@ -130,7 +175,19 @@ public class FinancialEntryService {
 
     @Transactional
     public void deleteById(Long id) {
-        entryRepository.deleteById(id);
+        FinancialEntry e = entryRepository.findById(id).orElse(null);
+        if (e != null) {
+            Account account = accountRepository.findById(e.getAccountId()).orElse(null);
+            if (account != null) {
+                if (e.getType() == EntryType.INCOME) {
+                    account.setBalance(account.getBalance().subtract(e.getAmount()));
+                } else if (e.getType() == EntryType.EXPENSE) {
+                    account.setBalance(account.getBalance().add(e.getAmount()));
+                }
+                accountRepository.save(account);
+            }
+            entryRepository.deleteById(id);
+        }
     }
 
     private static String join(List<String> list) {
