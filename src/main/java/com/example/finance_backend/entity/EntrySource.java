@@ -4,5 +4,6 @@ public enum EntrySource {
     MANUAL,
     OCR,
     VOICE,
-    CLIPBOARD
+    CLIPBOARD,
+    AI
 }
