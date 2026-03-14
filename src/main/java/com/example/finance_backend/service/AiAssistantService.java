@@ -109,10 +109,22 @@ public class AiAssistantService {
             AiAssistantResponse response = handleQuery(parsed);
             return finalizeResponse(response, conversationId, message);
         }
+        if ("UPDATE".equals(intent)) {
+            AiAssistantResponse response = handleUpdate(parsed, message, request.getAccountId());
+            return finalizeResponse(response, conversationId, message);
+        }
+        if ("DELETE".equals(intent)) {
+            AiAssistantResponse response = handleDelete(parsed, message);
+            return finalizeResponse(response, conversationId, message);
+        }
+        if ("ADVICE".equals(intent)) {
+            AiAssistantResponse response = handleAdvice(parsed);
+            return finalizeResponse(response, conversationId, message);
+        }
 
         AiAssistantResponse response = AiAssistantResponse.builder()
                 .intent("UNKNOWN")
-                .reply("Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng trước tôi tiêu bao nhiêu\" hoặc \"Hôm nay tôi ăn phở 45k\".")
+                .reply("Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng trước tôi tiêu bao nhiêu\", \"Hôm nay tôi ăn phở 45k\" hoặc \"Xóa giao dịch 45k vừa rồi\".")
                 .build();
         return finalizeResponse(response, conversationId, message);
     }
@@ -135,6 +147,7 @@ public class AiAssistantService {
         if (entries.isEmpty()) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
+                    .refreshRequired(false)
                     .reply("Mình chưa thấy khoản chi/thu nào rõ ràng. Bạn thử ghi: \"Hôm nay ăn phở 45k\" nhé.")
                     .build();
         }
@@ -219,6 +232,7 @@ public class AiAssistantService {
                     : "Không thể lưu giao dịch: " + errors.get(0);
             return AiAssistantResponse.builder()
                     .intent("INSERT")
+                    .refreshRequired(false)
                     .reply(errorText)
                     .build();
         }
@@ -232,6 +246,7 @@ public class AiAssistantService {
         return AiAssistantResponse.builder()
                 .intent("INSERT")
                 .createdCount(createdCount)
+                .refreshRequired(true)
                 .reply(reply.toString())
                 .build();
     }
@@ -286,10 +301,237 @@ public class AiAssistantService {
                 return buildTopCategoryReply(start, end, entries);
             case "LIST":
                 return buildListReply(start, end, entries, q.limit);
+            case "AVERAGE":
+                return buildAverageReply(start, end, entries);
+            case "TREND":
+                return buildTrendReply(start, end, typeFilter);
+            case "PERCENTAGE":
+                return buildPercentageReply(start, end, entries);
             case "TOTAL":
             default:
                 return buildTotalReply(start, end, entries, typeFilter);
         }
+    }
+
+    private AiAssistantResponse buildAverageReply(LocalDate start, LocalDate end,
+            List<com.example.finance_backend.entity.FinancialEntry> entries) {
+        BigDecimal total = entries.stream()
+                .map(com.example.finance_backend.entity.FinancialEntry::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        long days = Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1);
+        BigDecimal average = total.divide(new BigDecimal(days), 0, RoundingMode.HALF_UP);
+
+        String reply = String.format("Trong khoảng từ %s đến %s (%d ngày), trung bình mỗi ngày bạn chi %s.",
+                start.format(DATE_FMT), end.format(DATE_FMT), days, formatVnd(average));
+        return AiAssistantResponse.builder()
+                .intent("QUERY")
+                .reply(reply)
+                .build();
+    }
+
+    private AiAssistantResponse buildTrendReply(LocalDate start, LocalDate end, String typeFilter) {
+        long days = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
+        LocalDate prevStart = start.minusDays(days);
+        LocalDate prevEnd = start.minusDays(1);
+
+        List<com.example.finance_backend.entity.FinancialEntry> currentEntries = entryRepository
+                .findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
+        List<com.example.finance_backend.entity.FinancialEntry> prevEntries = entryRepository
+                .findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(prevStart, prevEnd);
+
+        if (!"ALL".equals(typeFilter)) {
+            final EntryType finalType = EntryType.valueOf(typeFilter);
+            currentEntries = currentEntries.stream().filter(e -> e.getType() == finalType).collect(Collectors.toList());
+            prevEntries = prevEntries.stream().filter(e -> e.getType() == finalType).collect(Collectors.toList());
+        }
+
+        BigDecimal currentTotal = currentEntries.stream().map(com.example.finance_backend.entity.FinancialEntry::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal prevTotal = prevEntries.stream().map(com.example.finance_backend.entity.FinancialEntry::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        String label = "INCOME".equals(typeFilter) ? "thu" : "chi";
+        String trend = "không đổi";
+        if (prevTotal.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal diff = currentTotal.subtract(prevTotal);
+            BigDecimal percent = diff.multiply(new BigDecimal("100")).divide(prevTotal, 1, RoundingMode.HALF_UP);
+            if (diff.compareTo(BigDecimal.ZERO) > 0) {
+                trend = "tăng " + percent + "%";
+            } else if (diff.compareTo(BigDecimal.ZERO) < 0) {
+                trend = "giảm " + percent.abs() + "%";
+            }
+        } else if (currentTotal.compareTo(BigDecimal.ZERO) > 0) {
+            trend = "mới phát sinh";
+        }
+
+        String reply = String.format("So với giai đoạn trước (%s đến %s), tổng %s của bạn %s. (Hiện tại: %s, Trước đó: %s)",
+                prevStart.format(DATE_FMT), prevEnd.format(DATE_FMT), label, trend, formatVnd(currentTotal),
+                formatVnd(prevTotal));
+        return AiAssistantResponse.builder()
+                .intent("QUERY")
+                .reply(reply)
+                .build();
+    }
+
+    private AiAssistantResponse buildPercentageReply(LocalDate start, LocalDate end,
+            List<com.example.finance_backend.entity.FinancialEntry> entries) {
+        BigDecimal total = entries.stream()
+                .map(com.example.finance_backend.entity.FinancialEntry::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        if (total.compareTo(BigDecimal.ZERO) <= 0) {
+            return AiAssistantResponse.builder().intent("QUERY").reply("Không có dữ liệu để tính tỷ lệ.").build();
+        }
+
+        Map<Long, BigDecimal> catTotals = new HashMap<>();
+        for (var e : entries) {
+            catTotals.merge(e.getCategoryId(), e.getAmount(), BigDecimal::add);
+        }
+
+        Map<Long, String> idToName = categoryService.getIdToNameMap();
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("Tỷ lệ chi tiêu từ %s đến %s:\n", start.format(DATE_FMT), end.format(DATE_FMT)));
+
+        catTotals.entrySet().stream()
+                .sorted(Map.Entry.<Long, BigDecimal>comparingByValue().reversed())
+                .forEach(entry -> {
+                    BigDecimal pct = entry.getValue().multiply(new BigDecimal("100")).divide(total, 1, RoundingMode.HALF_UP);
+                    sb.append(String.format("- %s: %s%% (%s)\n", idToName.getOrDefault(entry.getKey(), "Khác"), pct,
+                            formatVnd(entry.getValue())));
+                });
+
+        return AiAssistantResponse.builder()
+                .intent("QUERY")
+                .reply(sb.toString().trim())
+                .build();
+    }
+
+    private AiAssistantResponse handleUpdate(AiParseResult parsed, String originalMessage, Long forcedAccountId) {
+        List<com.example.finance_backend.entity.FinancialEntry> targets = findTargetEntries(parsed.target);
+        if (targets.isEmpty()) {
+            return AiAssistantResponse.builder().intent("UPDATE").reply("Mình không tìm thấy giao dịch nào khớp để sửa.").build();
+        }
+        if (targets.size() > 1) {
+            return AiAssistantResponse.builder().intent("UPDATE").reply("Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: ngày hoặc số tiền cụ thể).").build();
+        }
+
+        com.example.finance_backend.entity.FinancialEntry entry = targets.get(0);
+        AiParsedEntry newData = (parsed.entries != null && !parsed.entries.isEmpty()) ? parsed.entries.get(0) : null;
+
+        if (newData == null) {
+            // Thử cứu vãn (salvage) dữ liệu nếu Gemini hụt nhưng message có pattern "thành"
+            String[] parts = originalMessage.toLowerCase(VI_LOCALE).split("\\b(thanh|thành|sang|thay|den|đến)\\b");
+            if (parts.length >= 2) {
+                newData = new AiParsedEntry();
+                newData.amount = extractAmount(parts[1]);
+                
+                // Chỉ lấy note mới nếu nó chứa thông tin khác ngoài số tiền
+                String notePart = parts[1].replaceAll("[0-9.,dđkK]+", " ").trim();
+                if (notePart.length() > 2) { // Ngưỡng tối thiểu để coi là có note mới
+                    newData.note = parts[1].trim();
+                }
+                
+                String catMatch = detectCategory(normalizeText(parts[1]));
+                if (catMatch != null) {
+                    newData.categoryName = catMatch;
+                }
+            }
+        }
+
+        if (newData == null) {
+            return AiAssistantResponse.builder().intent("UPDATE").reply("Bạn muốn sửa thông tin gì của giao dịch này?").build();
+        }
+
+        if (newData.amount != null) entry.setAmount(newData.amount);
+        if (newData.note != null && !newData.note.isBlank()) entry.setNote(newData.note);
+        if (newData.date != null && !newData.date.isBlank()) {
+             LocalDate d = parseDate(newData.date, null);
+             if (d != null) entry.setTransactionDate(d);
+        }
+        if (newData.categoryName != null && !newData.categoryName.isBlank()) {
+            Map<String, Long> nameToId = getNameToIdMap();
+            Long catId = resolveCategoryId(nameToId, newData.categoryName, entry.getCategoryId());
+            entry.setCategoryId(catId);
+        }
+
+        entryRepository.save(entry);
+        return AiAssistantResponse.builder()
+                .intent("UPDATE")
+                .refreshRequired(true)
+                .reply("Đã cập nhật giao dịch: " + formatVnd(entry.getAmount()) + " - " + entry.getNote())
+                .build();
+    }
+
+    private AiAssistantResponse handleDelete(AiParseResult parsed, String originalMessage) {
+        List<com.example.finance_backend.entity.FinancialEntry> targets = findTargetEntries(parsed.target);
+        if (targets.isEmpty()) {
+            return AiAssistantResponse.builder().intent("DELETE").reply("Mình không tìm thấy giao dịch nào khớp để xóa.").build();
+        }
+
+        boolean deleteAll = parsed.target != null && Boolean.TRUE.equals(parsed.target.deleteAll);
+        if (!deleteAll && targets.size() > 1) {
+            return AiAssistantResponse.builder().intent("DELETE").reply("Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: 'Xóa tất cả' hoặc số tiền cụ thể).").build();
+        }
+
+        int deletedCount = targets.size();
+        entryRepository.deleteAll(targets);
+
+        String reply = deletedCount == 1 
+            ? "Đã xóa giao dịch: " + formatVnd(targets.get(0).getAmount()) + " - " + targets.get(0).getNote()
+            : "Đã xóa " + deletedCount + " giao dịch khớp với yêu cầu.";
+
+        return AiAssistantResponse.builder()
+                .intent("DELETE")
+                .refreshRequired(true)
+                .reply(reply)
+                .build();
+    }
+
+    private AiAssistantResponse handleAdvice(AiParseResult parsed) {
+        String reply = parsed.adviceReply != null ? parsed.adviceReply : "Mình có thể giúp gì cho bạn về quản lý tài chính?";
+        return AiAssistantResponse.builder()
+                .intent("ADVICE")
+                .reply(reply)
+                .build();
+    }
+
+    private List<com.example.finance_backend.entity.FinancialEntry> findTargetEntries(AiParsedTarget target) {
+        if (target == null) return List.of();
+        LocalDate searchDate = parseDate(target.date, null);
+        
+        // Nếu không có ngày cụ thể, mở rộng phạm vi ra 30 ngày để dễ tìm hơn
+        LocalDate start = searchDate != null ? searchDate : LocalDate.now().minusDays(30);
+        LocalDate end = searchDate != null ? searchDate : LocalDate.now();
+
+        List<com.example.finance_backend.entity.FinancialEntry> entries = entryRepository
+                .findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
+
+        return entries.stream()
+                .filter(e -> {
+                    if (target.amount != null && e.getAmount().compareTo(target.amount) != 0) return false;
+                    if (target.noteKeywords != null && !target.noteKeywords.isBlank()) {
+                        String note = e.getNote() != null ? normalizeText(e.getNote().toLowerCase(VI_LOCALE)) : "";
+                        String keywords = normalizeText(target.noteKeywords.toLowerCase(VI_LOCALE));
+                        
+                        // Loại bỏ STOP WORDS
+                        keywords = keywords.replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật|thanh|thành|sang|thay|den|đến|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi)\\b", "")
+                                        .replaceAll("\\s+", " ")
+                                        .trim();
+                        
+                        // LOẠI BỎ TẤT CẢ CON SỐ, DẤU CHẤM, DẤU PHẨY (vì user có thể viết 200k, 200.000 trong khi note có thể khác)
+                        keywords = keywords.replaceAll("[0-9.,dđkK]+", " ")
+                                        .replaceAll("\\s+", " ")
+                                        .trim();
+                                        
+                        if (!keywords.isBlank() && !note.contains(keywords)) return false;
+                    }
+                    if (target.categoryName != null && !target.categoryName.isBlank()) {
+                        String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "").toLowerCase(VI_LOCALE);
+                        if (!catName.contains(target.categoryName.toLowerCase(VI_LOCALE))) return false;
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
     }
 
     private AiAssistantResponse buildTotalReply(LocalDate start, LocalDate end,
@@ -380,21 +622,29 @@ public class AiAssistantService {
                 YÊU CẦU ĐẦU RA:
                 - Chỉ trả về JSON thuần, không markdown, không giải thích thêm.
                 - Luôn dùng định dạng ngày YYYY-MM-DD.
-                - Nếu là câu hỏi thống kê/tra cứu -> intent=QUERY.
-                - Nếu là câu nhập chi tiêu/thu nhập -> intent=INSERT và điền entries.
-                - Nếu không chắc -> intent=UNKNOWN.
-                - Trước khi trả JSON, hãy tự tóm tắt ngữ cảnh trong suy nghĩ nội bộ, không xuất ra.
+                - Xác định intent: INSERT (thêm), QUERY (tra cứu), UPDATE (sửa), DELETE (xóa), ADVICE (tư vấn/hỏi đáp chung).
+                - Nếu là ADVICE, hãy điền câu trả lời vào trường "adviceReply".
+                - Khi UPDATE/DELETE, dùng "target" để xác định giao dịch cần tác động (số tiền, ngày, danh mục cũ). Dùng "entries[0]" để chứa thông tin mới (nếu là UPDATE).
+                - Nếu muốn xóa tất cả giao dịch trong một khoảng thời gian/điều kiện, đặt "target.deleteAll = true".
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "UNKNOWN",
+                  "adviceReply": "string (chỉ dùng cho ADVICE)",
                   "query": {
-                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST",
+                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE",
                     "type": "EXPENSE" | "INCOME" | "ALL",
                     "startDate": "YYYY-MM-DD",
                     "endDate": "YYYY-MM-DD",
                     "limit": 10,
                     "categoryName": "string"
+                  },
+                  "target": {
+                    "amount": 45000,
+                    "categoryName": "Ăn uống",
+                    "date": "YYYY-MM-DD",
+                    "noteKeywords": "phở",
+                    "deleteAll": false
                   },
                   "entries": [
                     {
@@ -407,15 +657,19 @@ public class AiAssistantService {
                   ]
                 }
 
-                QUY TẮC:
-                - Quy đổi tiền: 45k=45000, 2tr=2000000, 1.5tr=1500000.
-                - "tháng này" => từ ngày 1 đến hôm nay; "tháng trước" => toàn bộ tháng trước; "hôm nay" => hôm nay.
-                - Với câu như "tháng này tôi tiêu nhiều nhất vào cái gì" -> metric=TOP_CATEGORY, type=EXPENSE.
-                - Với câu như "tháng trước tôi tiêu bao nhiêu" -> metric=TOTAL, type=EXPENSE.
-                - Với câu như "danh sách chi tiêu hôm nay" -> metric=LIST, type=EXPENSE, startDate=endDate=hôm nay.
-                - Với câu như "tháng này tôi thu bao nhiêu" -> metric=TOTAL, type=INCOME.
-                - Với câu như "nạp tiền 2 triệu vào ví" hoặc "lương tháng này 15tr" -> intent=INSERT, type=INCOME.
-                - Với câu như "nhận lương 3 triệu" -> intent=INSERT, type=INCOME, categoryName="Nạp tiền".
+                VÍ DỤ UPDATE/DELETE:
+                - "Sửa khoản ăn trưa hôm qua thành 50k": intent=UPDATE, target={amount: null, noteKeywords: "ăn trưa", date: "hôm qua"}, entries=[{amount: 50000}]
+                - "Xóa giao dịch 45k": intent=DELETE, target={amount: 45000}
+                - "Xóa tất cả giao dịch hôm nay": intent=DELETE, target={date: "hôm nay", deleteAll: true}
+                - "Xóa giao dịch đổ xăng 50k": intent=DELETE, target={amount: 50000, noteKeywords: "đổ xăng"} (TUYỆT ĐỐI KHÔNG CHỌN INSERT/QUERY CHO CÂU CÓ TỪ 'XÓA')
+
+                VÍ DỤ QUERY NÂNG CAO:
+                - "Trung bình mỗi ngày tiêu bao nhiêu": metric=AVERAGE
+                - "Chi phí tháng này tăng hay giảm so với tháng trước": metric=TREND
+                - "Tỷ lệ chi tiêu các nhóm": metric=PERCENTAGE
+
+                VÍ DỤ ADVICE:
+                - "Làm sao để tiết kiệm tiền?": intent=ADVICE, adviceReply="Để tiết kiệm tiền, bạn nên..."
 
                 ĐẦU VÀO:
                 %s
@@ -613,6 +867,37 @@ public class AiAssistantService {
             return null;
 
         String normalized = normalizeText(lower);
+        boolean isDelete = containsAny(normalized, List.of("xoa", "huy", "bo qua"));
+        boolean isUpdate = containsAny(normalized, List.of("sua", "doi", "cap nhat", "thanh"));
+        boolean isAll = normalized.contains("tat ca") || normalized.contains("het");
+
+        if (isDelete && !normalized.contains("bao nhieu")) { // Tránh nhầm với Query kiểu "Tuần này xóa bao nhiêu" (nếu có)
+            AiParseResult result = new AiParseResult();
+            result.intent = "DELETE";
+            result.target = new AiParsedTarget();
+            result.target.deleteAll = isAll;
+            result.target.date = detectSingleDate(normalized, LocalDate.now()).format(DATE_FMT);
+            BigDecimal amt = extractAmount(lower);
+            if (amt != null) result.target.amount = amt;
+            
+            // Nếu là xóa tất cả, không cần trích xuất keyword từ nội dung
+            if (!isAll) {
+                // Thử trích xuất keyword: bỏ đi các từ chỉ lệnh và ngày tháng
+                String kw = lower.replaceAll("\\b(xoa|huy|bo|giup|giao dich|khoan|cai|nay|hom nay|hom qua|ngay|thang|nam|vi|momo)\\b", "")
+                                 .replaceAll("\\s+", " ")
+                                 .trim();
+                // Bỏ tiền ra khỏi keyword nếu có
+                if (amt != null) {
+                    kw = kw.replace(amt.toString(), "")
+                           .replace(amt.divide(new BigDecimal("1000")).toString() + "k", "")
+                           .replaceAll("\\s+", " ")
+                           .trim();
+                }
+                result.target.noteKeywords = kw;
+            }
+            return result;
+        }
+
         boolean isQuery = containsAny(normalized, List.of(
                 "bao nhieu", "tong", "thong ke", "nhieu nhat", "cao nhat",
                 "danh sach", "liet ke", "thang nay", "thang truoc", "hom nay", "hom qua", "nam nay"));
@@ -630,6 +915,52 @@ public class AiAssistantService {
         }
 
         if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+            if (isDelete) {
+                AiParsedTarget target = new AiParsedTarget();
+                target.amount = amount;
+                target.noteKeywords = message.trim();
+                AiParseResult res = new AiParseResult();
+                res.intent = "DELETE";
+                res.target = target;
+                return res;
+            }
+            if (isUpdate) {
+                AiParseResult res = new AiParseResult();
+                res.intent = "UPDATE";
+                res.target = new AiParsedTarget();
+                
+                // Thử tách chuỗi dựa trên các từ khóa chuyển đổi (bao gồm cả tiếng Việt có dấu)
+                String[] parts = lower.split("\\b(thanh|thành|sang|thay|den|đến)\\b");
+                if (parts.length >= 2) {
+                    // Phần 1 là thông tin cũ
+                    BigDecimal oldAmount = extractAmount(parts[0]);
+                    res.target.amount = oldAmount != null ? oldAmount : amount;
+                    res.target.noteKeywords = parts[0].replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật)\\b", "").trim();
+                    
+                    LocalDate detectDate = detectSingleDate(parts[0], null);
+                    if (detectDate != null) res.target.date = detectDate.format(DATE_FMT);
+                    
+                    // Phần 2 là thông tin mới
+                    AiParsedEntry newEntry = new AiParsedEntry();
+                    newEntry.amount = extractAmount(parts[1]);
+                    
+                    // Chỉ lấy note mới nếu có chữ thực sự
+                    String notePart = parts[1].replaceAll("[0-9.,dđkK]+", " ").trim();
+                    if (notePart.length() > 2) {
+                        newEntry.note = parts[1].trim();
+                    }
+                    
+                    String catMatch = detectCategory(normalizeText(parts[1]));
+                    if (catMatch != null) {
+                        newEntry.categoryName = catMatch;
+                    }
+                    res.entries = List.of(newEntry);
+                } else {
+                    res.target.amount = amount;
+                }
+                return res;
+            }
+
             AiParsedEntry entry = new AiParsedEntry();
             entry.amount = amount;
             entry.type = detectEntryType(contextNormalized);
@@ -637,10 +968,10 @@ public class AiAssistantService {
             entry.note = message.trim();
             entry.date = detectSingleDate(normalized, LocalDate.now()).format(DATE_FMT);
 
-            AiParseResult result = new AiParseResult();
-            result.intent = "INSERT";
-            result.entries = List.of(entry);
-            return result;
+            AiParseResult res = new AiParseResult();
+            res.intent = "INSERT";
+            res.entries = List.of(entry);
+            return res;
         }
 
         AiParsedQuery query = new AiParsedQuery();
@@ -689,11 +1020,12 @@ public class AiAssistantService {
             if (normalized.contains(entry.getKey()))
                 return entry.getValue();
         }
-        return "Khác";
+        return null;
     }
 
     private static DateRange detectDateRange(String normalized, LocalDate today) {
-        if (normalized.contains("hom nay")) {
+        if (normalized.contains("hom nay") || normalized.contains("vua nay") || normalized.contains("vua moi") || 
+            normalized.contains("chieu nay") || normalized.contains("sang nay") || normalized.contains("toi nay")) {
             return new DateRange(today, today);
         }
         if (normalized.contains("hom qua")) {
@@ -717,11 +1049,14 @@ public class AiAssistantService {
         return null;
     }
 
-    private static LocalDate detectSingleDate(String normalized, LocalDate today) {
+    private static LocalDate detectSingleDate(String raw, LocalDate fallback) {
+        if (raw == null) return fallback;
+        String normalized = normalizeText(raw.toLowerCase(VI_LOCALE));
+        LocalDate today = LocalDate.now();
         DateRange range = detectDateRange(normalized, today);
         if (range != null)
             return range.start;
-        return today;
+        return fallback;
     }
 
     private static BigDecimal extractAmount(String text) {
@@ -859,8 +1194,19 @@ public class AiAssistantService {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class AiParseResult {
         public String intent;
+        public String adviceReply;
         public AiParsedQuery query;
+        public AiParsedTarget target;
         public List<AiParsedEntry> entries;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class AiParsedTarget {
+        public BigDecimal amount;
+        public String categoryName;
+        public String date;
+        public String noteKeywords;
+        public Boolean deleteAll;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

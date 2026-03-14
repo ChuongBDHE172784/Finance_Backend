@@ -13,4 +13,5 @@ public class AiAssistantResponse {
     private Integer createdCount;
     private String conversationId;
     private Boolean needsAccountSelection;
+    private Boolean refreshRequired;
 }
