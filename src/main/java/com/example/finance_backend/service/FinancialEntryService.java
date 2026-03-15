@@ -26,43 +26,50 @@ public class FinancialEntryService {
     private final CategoryService categoryService;
 
     @Transactional(readOnly = true)
-    public List<FinancialEntryDto> findAll() {
+    public List<FinancialEntryDto> findAll(Long userId) {
+        if (userId == null) return List.of();
         var idToName = categoryService.getIdToNameMap();
-        return entryRepository.findAllByOrderByTransactionDateDescCreatedAtDesc().stream()
+        return entryRepository.findByUserIdOrderByTransactionDateDescCreatedAtDesc(userId).stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public List<FinancialEntryDto> findByDateRange(LocalDate start, LocalDate end) {
+    public List<FinancialEntryDto> findByDateRange(Long userId, LocalDate start, LocalDate end) {
+        if (userId == null) return List.of();
         var idToName = categoryService.getIdToNameMap();
-        return entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end)
+        return entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
                 .stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public List<FinancialEntryDto> findByTag(String tag) {
+    public List<FinancialEntryDto> findByTag(Long userId, String tag) {
+        if (userId == null) return List.of();
         var idToName = categoryService.getIdToNameMap();
-        return entryRepository.findByTagContaining(tag).stream()
+        return entryRepository.findByUserIdAndTagContaining(userId, tag).stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public Optional<FinancialEntryDto> findById(Long id) {
+    public Optional<FinancialEntryDto> findById(Long id, Long userId) {
         return entryRepository.findById(id)
+                .filter(e -> userId == null || userId.equals(e.getUserId()))
                 .map(e -> FinancialEntryDto.fromEntity(e, categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "")));
     }
 
     @Transactional
-    public FinancialEntryDto create(CreateEntryRequest req) {
+    public FinancialEntryDto create(CreateEntryRequest req, Long userId) {
         if (!categoryService.getIdToNameMap().containsKey(req.getCategoryId())) {
             throw new IllegalArgumentException("Unknown Category ID: " + req.getCategoryId());
         }
         Account account = accountRepository.findById(req.getAccountId())
                 .orElseThrow(() -> new IllegalArgumentException("Account not found"));
+        if (userId != null && !userId.equals(account.getUserId())) {
+            throw new IllegalArgumentException("Account not found");
+        }
 
         EntryType type = EntryType.valueOf(req.getType().toUpperCase());
         LocalDate date = req.getTransactionDate();
@@ -82,6 +89,7 @@ public class FinancialEntryService {
                 .latitude(req.getLatitude())
                 .longitude(req.getLongitude())
                 .source(source != null ? source : EntrySource.MANUAL)
+                .userId(userId)
                 .build();
         
         // Update account balance
@@ -98,12 +106,15 @@ public class FinancialEntryService {
     }
 
     @Transactional
-    public FinancialEntryDto update(Long id, CreateEntryRequest req) {
+    public FinancialEntryDto update(Long id, CreateEntryRequest req, Long userId) {
         if (!categoryService.getIdToNameMap().containsKey(req.getCategoryId())) {
             throw new IllegalArgumentException("Unknown Category ID: " + req.getCategoryId());
         }
         FinancialEntry e = entryRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Entry not found"));
+        if (userId != null && !userId.equals(e.getUserId())) {
+            throw new IllegalArgumentException("Entry not found");
+        }
 
         Long oldAccountId = e.getAccountId();
         EntryType oldType = e.getType();
@@ -151,9 +162,12 @@ public class FinancialEntryService {
     }
 
     @Transactional
-    public FinancialEntryDto uploadImage(Long id, org.springframework.web.multipart.MultipartFile file) {
+    public FinancialEntryDto uploadImage(Long id, org.springframework.web.multipart.MultipartFile file, Long userId) {
         FinancialEntry e = entryRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Entry not found"));
+        if (userId != null && !userId.equals(e.getUserId())) {
+            throw new IllegalArgumentException("Entry not found");
+        }
         try {
             String dir = "uploads/";
             java.io.File d = new java.io.File(dir);
@@ -176,9 +190,9 @@ public class FinancialEntryService {
     }
 
     @Transactional
-    public void deleteById(Long id) {
+    public void deleteById(Long id, Long userId) {
         FinancialEntry e = entryRepository.findById(id).orElse(null);
-        if (e != null) {
+        if (e != null && (userId == null || userId.equals(e.getUserId()))) {
             Long accountId = e.getAccountId();
             EntryType type = e.getType();
             if (accountId != null) {

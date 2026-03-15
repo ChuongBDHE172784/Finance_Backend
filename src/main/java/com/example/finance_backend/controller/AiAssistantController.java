@@ -17,7 +17,10 @@ public class AiAssistantController {
     private final AiAssistantService aiAssistantService;
 
     @PostMapping("/assistant")
-    public ResponseEntity<AiAssistantResponse> assistant(@Valid @RequestBody AiAssistantRequest request) {
+    public ResponseEntity<AiAssistantResponse> assistant(
+            @Valid @RequestBody AiAssistantRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        request.setUserId(userId);
         return ResponseEntity.ok(aiAssistantService.handle(request));
     }
 }

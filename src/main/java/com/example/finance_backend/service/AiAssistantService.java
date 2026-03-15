@@ -102,7 +102,7 @@ public class AiAssistantService {
 
         final String intent = parsed.intent.trim().toUpperCase(Locale.ROOT);
         if ("INSERT".equals(intent)) {
-            AiAssistantResponse response = handleInsert(message, parsed, request.getAccountId());
+            AiAssistantResponse response = handleInsert(message, parsed, request.getAccountId(), request.getUserId());
             return finalizeResponse(response, conversationId, message);
         }
         if ("QUERY".equals(intent)) {
@@ -142,7 +142,7 @@ public class AiAssistantService {
         return mapper.readValue(json, AiParseResult.class);
     }
 
-    private AiAssistantResponse handleInsert(String originalMessage, AiParseResult parsed, Long forcedAccountId) {
+    private AiAssistantResponse handleInsert(String originalMessage, AiParseResult parsed, Long forcedAccountId, Long userId) {
         List<AiParsedEntry> entries = parsed.entries == null ? List.of() : parsed.entries;
         if (entries.isEmpty()) {
             return AiAssistantResponse.builder()
@@ -151,7 +151,7 @@ public class AiAssistantService {
                     .reply("Mình chưa thấy khoản chi/thu nào rõ ràng. Bạn thử ghi: \"Hôm nay ăn phở 45k\" nhé.")
                     .build();
         }
-        AccountResolution accountResolution = resolveAccount(originalMessage, forcedAccountId);
+        AccountResolution accountResolution = resolveAccount(originalMessage, forcedAccountId, userId);
         if (accountResolution.errorMessage != null) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
@@ -172,6 +172,13 @@ public class AiAssistantService {
                     .build();
         }
         Long accountId = accountResolution.accountId;
+        // Đảm bảo entry gắn đúng user: nếu request không có userId thì lấy từ chủ ví đã chọn
+        Long effectiveUserId = userId;
+        if (effectiveUserId == null && accountId != null) {
+            effectiveUserId = accountRepository.findById(accountId)
+                    .map(Account::getUserId)
+                    .orElse(null);
+        }
 
         Map<String, Long> nameToId = getNameToIdMap();
         Long fallbackCategoryId = resolveFallbackCategoryId(nameToId);
@@ -215,7 +222,7 @@ public class AiAssistantService {
                     .source("AI")
                     .build();
             try {
-                FinancialEntryDto created = entryService.create(req);
+                FinancialEntryDto created = entryService.create(req, effectiveUserId);
                 createdCount++;
                 String catName = created.getCategoryName() != null ? created.getCategoryName() : "";
                 String sign = "INCOME".equals(type) ? "+" : "-";
@@ -757,8 +764,10 @@ public class AiAssistantService {
         return trimmed.substring(0, 77) + "...";
     }
 
-    private AccountResolution resolveAccount(String message, Long forcedAccountId) {
-        List<Account> accounts = accountRepository.findAll();
+    private AccountResolution resolveAccount(String message, Long forcedAccountId, Long userId) {
+        List<Account> accounts = (userId != null)
+                ? accountRepository.findByUserIdOrderByNameAsc(userId)
+                : accountRepository.findAll();
         if (accounts.isEmpty()) {
             return AccountResolution.none();
         }

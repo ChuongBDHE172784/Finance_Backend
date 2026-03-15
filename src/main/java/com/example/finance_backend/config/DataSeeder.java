@@ -1,9 +1,11 @@
 package com.example.finance_backend.config;
 
+import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.entity.Category;
 import com.example.finance_backend.entity.User;
 import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.repository.UserRepository;
+import com.example.finance_backend.service.AccountService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -20,6 +22,7 @@ public class DataSeeder implements ApplicationRunner {
     private final CategoryRepository categoryRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AccountService accountService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -37,11 +40,16 @@ public class DataSeeder implements ApplicationRunner {
 
     private void ensureDefaultUser() {
         if (userRepository.findByEmailIgnoreCase("admin@example.com").isPresent()) return;
-        userRepository.save(User.builder()
+        User admin = userRepository.save(User.builder()
                 .email("admin@example.com")
                 .passwordHash(passwordEncoder.encode("123456"))
                 .displayName("Quản trị viên")
                 .build());
+        Account defaultAccount = Account.builder()
+                .name("Ví chính")
+                .balance(java.math.BigDecimal.ZERO)
+                .build();
+        accountService.create(defaultAccount, admin.getId());
     }
 
     private void ensureCategory(String name, String icon, String color, int order) {

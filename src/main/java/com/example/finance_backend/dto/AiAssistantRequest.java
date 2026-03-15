@@ -16,4 +16,7 @@ public class AiAssistantRequest {
     private String conversationId;
 
     private Long accountId;
+
+    /** User ID from X-User-Id header (for scoping entries/accounts). */
+    private Long userId;
 }

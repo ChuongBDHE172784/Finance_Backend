@@ -63,6 +63,9 @@ public class FinancialEntry {
     @Column(length = 20)
     private EntrySource source;
 
+    @Column(name = "user_id")
+    private Long userId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

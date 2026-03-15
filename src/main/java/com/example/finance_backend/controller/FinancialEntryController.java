@@ -23,46 +23,57 @@ public class FinancialEntryController {
 
     @GetMapping
     public ResponseEntity<List<FinancialEntryDto>> getAll(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) String tag
     ) {
         if (tag != null && !tag.isBlank()) {
-            return ResponseEntity.ok(entryService.findByTag(tag.trim()));
+            return ResponseEntity.ok(entryService.findByTag(userId, tag.trim()));
         }
         if (from != null && to != null) {
-            return ResponseEntity.ok(entryService.findByDateRange(from, to));
+            return ResponseEntity.ok(entryService.findByDateRange(userId, from, to));
         }
-        return ResponseEntity.ok(entryService.findAll());
+        return ResponseEntity.ok(entryService.findAll(userId));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<FinancialEntryDto> getById(@PathVariable Long id) {
-        return entryService.findById(id)
+    public ResponseEntity<FinancialEntryDto> getById(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return entryService.findById(id, userId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
-    public ResponseEntity<FinancialEntryDto> create(@Valid @RequestBody CreateEntryRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(entryService.create(request));
+    public ResponseEntity<FinancialEntryDto> create(
+            @Valid @RequestBody CreateEntryRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(entryService.create(request, userId));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<FinancialEntryDto> update(@PathVariable Long id, @Valid @RequestBody CreateEntryRequest request) {
-        return ResponseEntity.ok(entryService.update(id, request));
+    public ResponseEntity<FinancialEntryDto> update(
+            @PathVariable Long id,
+            @Valid @RequestBody CreateEntryRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return ResponseEntity.ok(entryService.update(id, request, userId));
     }
 
     @PostMapping("/{id}/image")
     public ResponseEntity<FinancialEntryDto> uploadImage(
             @PathVariable Long id,
-            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
-        return ResponseEntity.ok(entryService.uploadImage(id, file));
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return ResponseEntity.ok(entryService.uploadImage(id, file, userId));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        entryService.deleteById(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        entryService.deleteById(id, userId);
         return ResponseEntity.noContent().build();
     }
 

@@ -30,4 +30,7 @@ public class Account {
 
     @Column(name = "color_hex", length = 20)
     private String colorHex;
+
+    @Column(name = "user_id")
+    private Long userId;
 }
