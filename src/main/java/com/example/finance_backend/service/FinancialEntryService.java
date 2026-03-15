@@ -75,6 +75,13 @@ public class FinancialEntryService {
         LocalDate date = req.getTransactionDate();
         EntrySource source = parseSource(req.getSource());
 
+        // Không cho phép chi tiêu vượt quá số dư hiện tại
+        if (type == EntryType.EXPENSE) {
+            if (account.getBalance().compareTo(req.getAmount()) < 0) {
+                throw new IllegalStateException("Số dư ví không đủ. Vui lòng chọn ví khác hoặc nạp thêm tiền.");
+            }
+        }
+
         FinancialEntry e = FinancialEntry.builder()
                 .type(type)
                 .amount(req.getAmount())
@@ -132,8 +139,16 @@ public class FinancialEntryService {
         // Apply new balance
         Account newAccount = accountRepository.findById(req.getAccountId())
                 .orElseThrow(() -> new IllegalArgumentException("New account not found"));
-        
+
         EntryType newType = EntryType.valueOf(req.getType().toUpperCase());
+
+        // Không cho phép chi tiêu vượt quá số dư sau khi đã rollback giao dịch cũ
+        if (newType == EntryType.EXPENSE) {
+            if (newAccount.getBalance().compareTo(req.getAmount()) < 0) {
+                throw new IllegalStateException("Số dư ví không đủ. Vui lòng chọn ví khác hoặc nạp thêm tiền.");
+            }
+        }
+
         if (newType == EntryType.INCOME) {
             newAccount.setBalance(newAccount.getBalance().add(req.getAmount()));
         } else if (newType == EntryType.EXPENSE) {
