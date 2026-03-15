@@ -104,17 +104,19 @@ public class FinancialEntryService {
         }
         FinancialEntry e = entryRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Entry not found"));
-        
-        Account oldAccount = accountRepository.findById(e.getAccountId())
-                .orElseThrow(() -> new IllegalArgumentException("Old account not found"));
-        
-        // Revert old balance
-        if (e.getType() == EntryType.INCOME) {
-            oldAccount.setBalance(oldAccount.getBalance().subtract(e.getAmount()));
-        } else if (e.getType() == EntryType.EXPENSE) {
-            oldAccount.setBalance(oldAccount.getBalance().add(e.getAmount()));
+
+        Long oldAccountId = e.getAccountId();
+        EntryType oldType = e.getType();
+        if (oldAccountId != null) {
+            Account oldAccount = accountRepository.findById(oldAccountId)
+                    .orElseThrow(() -> new IllegalArgumentException("Old account not found"));
+            if (oldType == EntryType.INCOME) {
+                oldAccount.setBalance(oldAccount.getBalance().subtract(e.getAmount()));
+            } else if (oldType == EntryType.EXPENSE) {
+                oldAccount.setBalance(oldAccount.getBalance().add(e.getAmount()));
+            }
+            accountRepository.save(oldAccount);
         }
-        accountRepository.save(oldAccount);
 
         // Apply new balance
         Account newAccount = accountRepository.findById(req.getAccountId())
@@ -177,14 +179,18 @@ public class FinancialEntryService {
     public void deleteById(Long id) {
         FinancialEntry e = entryRepository.findById(id).orElse(null);
         if (e != null) {
-            Account account = accountRepository.findById(e.getAccountId()).orElse(null);
-            if (account != null) {
-                if (e.getType() == EntryType.INCOME) {
-                    account.setBalance(account.getBalance().subtract(e.getAmount()));
-                } else if (e.getType() == EntryType.EXPENSE) {
-                    account.setBalance(account.getBalance().add(e.getAmount()));
+            Long accountId = e.getAccountId();
+            EntryType type = e.getType();
+            if (accountId != null) {
+                Account account = accountRepository.findById(accountId).orElse(null);
+                if (account != null && type != null) {
+                    if (type == EntryType.INCOME) {
+                        account.setBalance(account.getBalance().subtract(e.getAmount()));
+                    } else if (type == EntryType.EXPENSE) {
+                        account.setBalance(account.getBalance().add(e.getAmount()));
+                    }
+                    accountRepository.save(account);
                 }
-                accountRepository.save(account);
             }
             entryRepository.deleteById(id);
         }

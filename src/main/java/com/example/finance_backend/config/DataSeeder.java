@@ -1,10 +1,13 @@
 package com.example.finance_backend.config;
 
 import com.example.finance_backend.entity.Category;
+import com.example.finance_backend.entity.User;
 import com.example.finance_backend.repository.CategoryRepository;
+import com.example.finance_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,9 +18,12 @@ import java.util.Optional;
 public class DataSeeder implements ApplicationRunner {
 
     private final CategoryRepository categoryRepository;
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     public void run(ApplicationArguments args) {
+        ensureDefaultUser();
         ensureCategory("Ăn uống", "restaurant", "FF9800", 1);
         ensureCategory("Xăng xe", "local_gas_station", "2196F3", 2);
         ensureCategory("Mua sắm", "shopping_bag", "9C27B0", 3);
@@ -27,6 +33,15 @@ public class DataSeeder implements ApplicationRunner {
         ensureCategory("Gửi xe", "local_parking", "795548", 7);
         ensureCategory("Nạp tiền", "account_balance_wallet", "4CAF50", 8, List.of("Nạp ví"));
         ensureCategory("Khác", "category", "009688", 99);
+    }
+
+    private void ensureDefaultUser() {
+        if (userRepository.findByEmailIgnoreCase("admin@example.com").isPresent()) return;
+        userRepository.save(User.builder()
+                .email("admin@example.com")
+                .passwordHash(passwordEncoder.encode("123456"))
+                .displayName("Quản trị viên")
+                .build());
     }
 
     private void ensureCategory(String name, String icon, String color, int order) {

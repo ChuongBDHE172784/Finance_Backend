@@ -33,6 +33,16 @@ public class SchemaFixer implements ApplicationRunner {
         } catch (Exception e) {
             log.warn("SchemaFixer failed to update constraint {}", CONSTRAINT_NAME, e);
         }
+        try {
+            jdbcTemplate.execute("alter table financial_entries alter column \"type\" drop not null");
+        } catch (Exception e) {
+            log.debug("SchemaFixer: type column already nullable or not exist");
+        }
+        try {
+            jdbcTemplate.execute("alter table financial_entries alter column account_id drop not null");
+        } catch (Exception e) {
+            log.debug("SchemaFixer: account_id column already nullable or not exist");
+        }
     }
 
     private boolean isPostgres() {

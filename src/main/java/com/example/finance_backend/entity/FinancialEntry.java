@@ -21,7 +21,7 @@ public class FinancialEntry {
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(length = 20)
     private EntryType type;
 
     @Column(nullable = false, precision = 15, scale = 2)
@@ -33,7 +33,7 @@ public class FinancialEntry {
     @Column(name = "category_id", nullable = false)
     private Long categoryId;
 
-    @Column(name = "account_id", nullable = false)
+    @Column(name = "account_id")
     private Long accountId;
 
     @Column(name = "to_account_id")
