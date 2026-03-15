@@ -1,6 +1,5 @@
 package com.example.finance_backend.dto;
 
-import com.example.finance_backend.entity.EntrySource;
 import com.example.finance_backend.entity.FinancialEntry;
 import lombok.*;
 
@@ -28,6 +27,9 @@ public class FinancialEntryDto {
     private String imageUrl;
     private Double latitude;
     private Double longitude;
+    private String type;
+    private Long accountId;
+    private Long toAccountId;
     private String source;
     private Instant createdAt;
 
@@ -44,6 +46,9 @@ public class FinancialEntryDto {
                 .imageUrl(e.getImageUrl())
                 .latitude(e.getLatitude())
                 .longitude(e.getLongitude())
+                .type(e.getType() != null ? e.getType().name() : null)
+                .accountId(e.getAccountId())
+                .toAccountId(e.getToAccountId())
                 .source(e.getSource() != null ? e.getSource().name() : null)
                 .createdAt(e.getCreatedAt())
                 .build();

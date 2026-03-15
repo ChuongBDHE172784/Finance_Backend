@@ -8,6 +8,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Optional;
 
 @Component
 @RequiredArgsConstructor
@@ -17,18 +18,40 @@ public class DataSeeder implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (categoryRepository.count() > 0) return;
+        ensureCategory("Ăn uống", "restaurant", "FF9800", 1);
+        ensureCategory("Xăng xe", "local_gas_station", "2196F3", 2);
+        ensureCategory("Mua sắm", "shopping_bag", "9C27B0", 3);
+        ensureCategory("Giải trí", "confirmation_number", "E91E63", 4);
+        ensureCategory("Y tế", "medical_services", "F44336", 5);
+        ensureCategory("Giáo dục", "school", "3F51B5", 6);
+        ensureCategory("Gửi xe", "local_parking", "795548", 7);
+        ensureCategory("Nạp tiền", "account_balance_wallet", "4CAF50", 8, List.of("Nạp ví"));
+        ensureCategory("Khác", "category", "009688", 99);
+    }
 
-        List<Category> defaultCategories = List.of(
-                Category.builder().name("Ăn uống").iconName("restaurant").colorHex("FF9800").sortOrder(1).build(),
-                Category.builder().name("Xăng xe").iconName("local_gas_station").colorHex("2196F3").sortOrder(2).build(),
-                Category.builder().name("Mua sắm").iconName("shopping_bag").colorHex("9C27B0").sortOrder(3).build(),
-                Category.builder().name("Giải trí").iconName("confirmation_number").colorHex("E91E63").sortOrder(4).build(),
-                Category.builder().name("Y tế").iconName("medical_services").colorHex("F44336").sortOrder(5).build(),
-                Category.builder().name("Giáo dục").iconName("school").colorHex("3F51B5").sortOrder(6).build(),
-                Category.builder().name("Gửi xe").iconName("local_parking").colorHex("795548").sortOrder(7).build(),
-                Category.builder().name("Khác").iconName("category").colorHex("009688").sortOrder(99).build()
-        );
-        categoryRepository.saveAll(defaultCategories);
+    private void ensureCategory(String name, String icon, String color, int order) {
+        ensureCategory(name, icon, color, order, List.of());
+    }
+
+    private void ensureCategory(String name, String icon, String color, int order, List<String> aliases) {
+        Optional<Category> existing = categoryRepository.findByName(name);
+        if (existing.isPresent()) return;
+
+        for (String alias : aliases) {
+            Optional<Category> aliasCategory = categoryRepository.findByName(alias);
+            if (aliasCategory.isPresent()) {
+                Category c = aliasCategory.get();
+                c.setName(name);
+                categoryRepository.save(c);
+                return;
+            }
+        }
+
+        categoryRepository.save(Category.builder()
+                .name(name)
+                .iconName(icon)
+                .colorHex(color)
+                .sortOrder(order)
+                .build());
     }
 }

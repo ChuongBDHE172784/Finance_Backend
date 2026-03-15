@@ -24,6 +24,14 @@ public class CreateEntryRequest {
     @NotNull
     private Long categoryId;
 
+    @NotNull
+    private Long accountId;
+
+    private Long toAccountId;
+
+    @NotNull
+    private String type; // INCOME, EXPENSE, TRANSFER
+
     @NotNull(message = "Transaction date is required")
     private LocalDate transactionDate;
 
