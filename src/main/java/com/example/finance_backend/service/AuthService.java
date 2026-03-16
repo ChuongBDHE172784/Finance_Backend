@@ -1,14 +1,17 @@
 package com.example.finance_backend.service;
 
-import com.example.finance_backend.dto.LoginRequest;
-import com.example.finance_backend.dto.LoginResponse;
-import com.example.finance_backend.dto.RegisterRequest;
+import com.example.finance_backend.dto.*;
 import com.example.finance_backend.entity.Account;
+import com.example.finance_backend.entity.PasswordResetToken;
 import com.example.finance_backend.entity.User;
+import com.example.finance_backend.repository.PasswordResetTokenRepository;
 import com.example.finance_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -23,6 +26,8 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AccountService accountService;
+    private final PasswordResetTokenRepository tokenRepository;
+    private final EmailService emailService;
 
     public LoginResponse login(LoginRequest req) {
         String email = req.getEmail().trim().toLowerCase();
@@ -66,6 +71,92 @@ public class AuthService {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .displayName(user.getDisplayName() != null ? user.getDisplayName() : user.getEmail())
+                .avatarUrl(user.getAvatarUrl())
                 .build();
+    }
+
+    public void updatePassword(Long userId, String oldPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu cũ không chính xác");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
+
+    public String uploadAvatar(Long userId, org.springframework.web.multipart.MultipartFile file) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        try {
+            String dir = "uploads/avatars/";
+            java.io.File d = new java.io.File(dir);
+            if (!d.exists()) d.mkdirs();
+            
+            String extension = "";
+            String originalFileName = file.getOriginalFilename();
+            if (originalFileName != null && originalFileName.lastIndexOf(".") > 0) {
+                extension = originalFileName.substring(originalFileName.lastIndexOf("."));
+            }
+            
+            String filename = "avatar_" + userId + "_" + System.currentTimeMillis() + extension;
+            java.nio.file.Path path = java.nio.file.Paths.get(dir + filename);
+            java.nio.file.Files.copy(file.getInputStream(), path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            
+            String avatarUrl = "/" + dir + filename;
+            user.setAvatarUrl(avatarUrl);
+            userRepository.save(user);
+            return avatarUrl;
+        } catch (java.io.IOException ex) {
+            throw new RuntimeException("Upload avatar failed", ex);
+        }
+    }
+
+    @Transactional
+    public void forgotPassword(String email) {
+        User user = userRepository.findByEmailIgnoreCase(email.trim().toLowerCase())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy người dùng với email này"));
+
+        try {
+            // Delete existing tokens for this user
+            tokenRepository.deleteByUser(user);
+            tokenRepository.flush(); // Force delete to happen before insert
+        } catch (Exception e) {
+            // If deletion fails (e.g. no tokens), we can ignore or log
+        }
+
+        String code = UUID.randomUUID().toString().substring(0, 6).toUpperCase(); 
+        PasswordResetToken resetToken = PasswordResetToken.builder()
+                .token(code)
+                .user(user)
+                .expiryDate(Instant.now().plus(15, ChronoUnit.MINUTES))
+                .build();
+
+        tokenRepository.save(resetToken);
+        
+        try {
+            emailService.sendResetPasswordEmail(user.getEmail(), code);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi khi gửi email: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void resetPassword(String code, String newPassword) {
+        PasswordResetToken resetToken = tokenRepository.findByToken(code)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code không đúng, vui lòng kiểm tra lại"));
+
+        if (resetToken.getExpiryDate().isBefore(Instant.now())) {
+            tokenRepository.delete(resetToken);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác thực đã hết hạn");
+        }
+
+        User user = resetToken.getUser();
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        tokenRepository.delete(resetToken);
     }
 }

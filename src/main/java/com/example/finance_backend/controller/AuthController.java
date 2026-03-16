@@ -25,4 +25,32 @@ public class AuthController {
     public ResponseEntity<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
+
+    @PutMapping("/password")
+    public ResponseEntity<String> updatePassword(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody UpdatePasswordRequest request) {
+        authService.updatePassword(userId, request.getOldPassword(), request.getNewPassword());
+        return ResponseEntity.ok("Đổi mật khẩu thành công");
+    }
+
+    @PostMapping("/avatar")
+    public ResponseEntity<String> uploadAvatar(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        String avatarUrl = authService.uploadAvatar(userId, file);
+        return ResponseEntity.ok(avatarUrl);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<String> forgotPassword(@RequestParam String email) {
+        authService.forgotPassword(email);
+        return ResponseEntity.ok("Mã xác thực đã được gửi về email của bạn");
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.getCode(), request.getNewPassword());
+        return ResponseEntity.ok("Đặt lại mật khẩu thành công");
+    }
 }
