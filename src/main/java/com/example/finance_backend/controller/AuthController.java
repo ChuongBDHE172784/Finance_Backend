@@ -25,9 +25,4 @@ public class AuthController {
     public ResponseEntity<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
-
-    @PostMapping("/google")
-    public ResponseEntity<LoginResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
-        return ResponseEntity.ok(authService.loginWithGoogle(request));
-    }
 }
