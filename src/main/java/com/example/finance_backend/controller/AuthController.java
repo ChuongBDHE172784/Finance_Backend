@@ -39,6 +39,14 @@ public class AuthController {
         return ResponseEntity.ok("Đổi mật khẩu thành công");
     }
 
+    @PutMapping("/display-name")
+    public ResponseEntity<String> updateDisplayName(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody UpdateDisplayNameRequest request) {
+        authService.updateDisplayName(userId, request.getDisplayName());
+        return ResponseEntity.ok("Cập nhật tên thành công");
+    }
+
     @PostMapping("/avatar")
     public ResponseEntity<String> uploadAvatar(
             @RequestHeader("X-User-Id") Long userId,

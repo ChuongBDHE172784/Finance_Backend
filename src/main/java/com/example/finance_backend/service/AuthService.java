@@ -154,6 +154,16 @@ public class AuthService {
         userRepository.save(user);
     }
 
+    public void updateDisplayName(Long userId, String displayName) {
+        if (displayName == null || displayName.trim().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tên không được để trống");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        user.setDisplayName(displayName.trim());
+        userRepository.save(user);
+    }
+
     public String uploadAvatar(Long userId, org.springframework.web.multipart.MultipartFile file) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));

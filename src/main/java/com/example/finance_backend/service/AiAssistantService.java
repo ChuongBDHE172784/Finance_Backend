@@ -26,8 +26,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.text.NumberFormat;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +41,9 @@ public class AiAssistantService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final Locale VI_LOCALE = new Locale("vi", "VN");
+    private static final Locale EN_LOCALE = Locale.US;
+    private static final String LANG_VI = "vi";
+    private static final String LANG_EN = "en";
     private static final Logger log = LoggerFactory.getLogger(AiAssistantService.class);
 
     private final FinancialEntryService entryService;
@@ -53,8 +58,46 @@ public class AiAssistantService {
 
     private Client client;
 
+    private static String resolveLanguage(String requested, String message) {
+        if (requested != null && !requested.isBlank()) {
+            String normalized = requested.trim().toLowerCase(Locale.ROOT);
+            if (normalized.startsWith(LANG_EN)) {
+                return LANG_EN;
+            }
+            if (normalized.startsWith(LANG_VI)) {
+                return LANG_VI;
+            }
+        }
+        if (containsVietnameseDiacritics(message)) {
+            return LANG_VI;
+        }
+        if (message != null) {
+            String lower = message.toLowerCase(Locale.ROOT);
+            if (containsAny(lower, List.of(
+                    "today", "yesterday", "this month", "last month", "this year", "last year",
+                    "delete", "remove", "update", "change", "income", "expense", "spend", "spent", "buy", "purchase"))) {
+                return LANG_EN;
+            }
+        }
+        return LANG_VI;
+    }
+
+    private static boolean isEnglish(String language) {
+        return LANG_EN.equals(language);
+    }
+
+    private static String t(String language, String vi, String en) {
+        return isEnglish(language) ? en : vi;
+    }
+
+    private static boolean containsVietnameseDiacritics(String text) {
+        if (text == null || text.isBlank()) return false;
+        return !normalizeText(text).equals(text);
+    }
+
     public AiAssistantResponse handle(AiAssistantRequest request) {
         final String message = request.getMessage() == null ? "" : request.getMessage().trim();
+        final String language = resolveLanguage(request.getLanguage(), message);
         String conversationId = request.getConversationId();
         if (conversationId == null || conversationId.isBlank()) {
             conversationId = UUID.randomUUID().toString();
@@ -62,7 +105,9 @@ public class AiAssistantService {
         if (message.isEmpty()) {
             AiAssistantResponse response = AiAssistantResponse.builder()
                     .intent("UNKNOWN")
-                    .reply("Bạn hãy nhập câu hỏi hoặc nội dung chi tiêu để mình xử lý nhé.")
+                    .reply(t(language,
+                            "Bạn hãy nhập câu hỏi hoặc nội dung chi tiêu để mình xử lý nhé.",
+                            "Please enter a question or a transaction so I can help."))
                     .build();
             response.setConversationId(conversationId);
             return response;
@@ -72,7 +117,7 @@ public class AiAssistantService {
         AiParseResult parsed = null;
         Exception geminiError = null;
         try {
-            parsed = parseWithGemini(message, history);
+            parsed = parseWithGemini(message, history, language);
         } catch (Exception e) {
             geminiError = e;
             log.warn("Gemini parse failed for message: {}", message, e);
@@ -86,7 +131,9 @@ public class AiAssistantService {
             } else if (geminiError != null) {
                 AiAssistantResponse response = AiAssistantResponse.builder()
                         .intent("UNKNOWN")
-                        .reply("Mình chưa kết nối được AI. Hãy kiểm tra GEMINI/GOOGLE API key ở backend và thử lại.")
+                        .reply(t(language,
+                                "Mình chưa kết nối được AI. Hãy kiểm tra GEMINI/GOOGLE API key ở backend và thử lại.",
+                                "I can't reach the AI right now. Please check the GEMINI/GOOGLE API key on the backend and try again."))
                         .build();
                 return finalizeResponse(response, conversationId, message);
             }
@@ -95,42 +142,46 @@ public class AiAssistantService {
         if (parsed == null || parsed.intent == null) {
             AiAssistantResponse response = AiAssistantResponse.builder()
                     .intent("UNKNOWN")
-                    .reply("Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng này tôi tiêu nhiều nhất vào cái gì?\" hoặc \"Hôm nay tôi ăn phở 45k\".")
+                    .reply(t(language,
+                            "Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng này tôi tiêu nhiều nhất vào cái gì?\" hoặc \"Hôm nay tôi ăn phở 45k\".",
+                            "I didn't quite understand. Try: \"What did I spend the most on this month?\" or \"I had pho for 45k today\"."))
                     .build();
             return finalizeResponse(response, conversationId, message);
         }
 
         final String intent = parsed.intent.trim().toUpperCase(Locale.ROOT);
         if ("INSERT".equals(intent)) {
-            AiAssistantResponse response = handleInsert(message, parsed, request.getAccountId(), request.getUserId());
+            AiAssistantResponse response = handleInsert(message, parsed, request.getAccountId(), request.getUserId(), language);
             return finalizeResponse(response, conversationId, message);
         }
         if ("QUERY".equals(intent)) {
-            AiAssistantResponse response = handleQuery(parsed);
+            AiAssistantResponse response = handleQuery(parsed, language);
             return finalizeResponse(response, conversationId, message);
         }
         if ("UPDATE".equals(intent)) {
-            AiAssistantResponse response = handleUpdate(parsed, message, request.getAccountId());
+            AiAssistantResponse response = handleUpdate(parsed, message, request.getAccountId(), language);
             return finalizeResponse(response, conversationId, message);
         }
         if ("DELETE".equals(intent)) {
-            AiAssistantResponse response = handleDelete(parsed, message);
+            AiAssistantResponse response = handleDelete(parsed, message, language);
             return finalizeResponse(response, conversationId, message);
         }
         if ("ADVICE".equals(intent)) {
-            AiAssistantResponse response = handleAdvice(parsed);
+            AiAssistantResponse response = handleAdvice(parsed, language);
             return finalizeResponse(response, conversationId, message);
         }
 
         AiAssistantResponse response = AiAssistantResponse.builder()
                 .intent("UNKNOWN")
-                .reply("Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng trước tôi tiêu bao nhiêu\", \"Hôm nay tôi ăn phở 45k\" hoặc \"Xóa giao dịch 45k vừa rồi\".")
+                .reply(t(language,
+                        "Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng trước tôi tiêu bao nhiêu\", \"Hôm nay tôi ăn phở 45k\" hoặc \"Xóa giao dịch 45k vừa rồi\".",
+                        "I didn't quite understand. Try: \"How much did I spend last month\", \"I had pho for 45k today\", or \"Delete the 45k transaction\"."))
                 .build();
         return finalizeResponse(response, conversationId, message);
     }
 
-    private AiParseResult parseWithGemini(String message, List<AiMessage> history) throws JsonProcessingException {
-        String prompt = buildPrompt(message, history);
+    private AiParseResult parseWithGemini(String message, List<AiMessage> history, String language) throws JsonProcessingException {
+        String prompt = buildPrompt(message, history, language);
         GenerateContentResponse response = getClient().models.generateContent(model, prompt, null);
         String text = response.text();
         if (text == null) {
@@ -142,16 +193,18 @@ public class AiAssistantService {
         return mapper.readValue(json, AiParseResult.class);
     }
 
-    private AiAssistantResponse handleInsert(String originalMessage, AiParseResult parsed, Long forcedAccountId, Long userId) {
+    private AiAssistantResponse handleInsert(String originalMessage, AiParseResult parsed, Long forcedAccountId, Long userId, String language) {
         List<AiParsedEntry> entries = parsed.entries == null ? List.of() : parsed.entries;
         if (entries.isEmpty()) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
                     .refreshRequired(false)
-                    .reply("Mình chưa thấy khoản chi/thu nào rõ ràng. Bạn thử ghi: \"Hôm nay ăn phở 45k\" nhé.")
+                    .reply(t(language,
+                            "Mình chưa thấy khoản chi/thu nào rõ ràng. Bạn thử ghi: \"Hôm nay ăn phở 45k\" nhé.",
+                            "I couldn't detect a clear transaction. Try: \"I had pho for 45k today\"."))
                     .build();
         }
-        AccountResolution accountResolution = resolveAccount(originalMessage, forcedAccountId, userId);
+        AccountResolution accountResolution = resolveAccount(originalMessage, forcedAccountId, userId, language);
         if (accountResolution.errorMessage != null) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
@@ -162,13 +215,17 @@ public class AiAssistantService {
             return AiAssistantResponse.builder()
                     .intent("NEED_ACCOUNT")
                     .needsAccountSelection(true)
-                    .reply("Bạn muốn dùng ví nào cho giao dịch này?")
+                    .reply(t(language,
+                            "Bạn muốn dùng ví nào cho giao dịch này?",
+                            "Which wallet should I use for this transaction?"))
                     .build();
         }
         if (accountResolution.accountId == null) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
-                    .reply("Bạn chưa có tài khoản/ví. Hãy tạo tài khoản trước khi thêm giao dịch nhé.")
+                    .reply(t(language,
+                            "Bạn chưa có tài khoản/ví. Hãy tạo tài khoản trước khi thêm giao dịch nhé.",
+                            "You don't have any wallet/account yet. Please create one before adding a transaction."))
                     .build();
         }
         Long accountId = accountResolution.accountId;
@@ -185,7 +242,9 @@ public class AiAssistantService {
         if (fallbackCategoryId == null) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
-                    .reply("Chưa có danh mục chi tiêu nào. Hãy tạo danh mục trước nhé.")
+                    .reply(t(language,
+                            "Chưa có danh mục chi tiêu nào. Hãy tạo danh mục trước nhé.",
+                            "No categories found. Please create a category first."))
                     .build();
         }
         Long incomeCategoryId = resolveCategoryId(nameToId, "Nạp tiền", fallbackCategoryId);
@@ -226,7 +285,7 @@ public class AiAssistantService {
                 createdCount++;
                 String catName = created.getCategoryName() != null ? created.getCategoryName() : "";
                 String sign = "INCOME".equals(type) ? "+" : "-";
-                savedLines.add(String.format("%s %s • %s", sign, formatVnd(entry.amount), catName));
+                savedLines.add(String.format("%s %s • %s", sign, formatVnd(entry.amount, language), catName));
             } catch (Exception ex) {
                 log.error("Failed to create entry from AI parse: {}", req, ex);
                 errors.add(ex.getMessage() != null ? ex.getMessage() : "Lỗi không xác định");
@@ -235,8 +294,12 @@ public class AiAssistantService {
 
         if (createdCount == 0) {
             String errorText = errors.isEmpty()
-                    ? "Mình chưa thể tạo giao dịch. Hãy thử nhập rõ số tiền và nội dung nhé."
-                    : "Không thể lưu giao dịch: " + errors.get(0);
+                    ? t(language,
+                        "Mình chưa thể tạo giao dịch. Hãy thử nhập rõ số tiền và nội dung nhé.",
+                        "I couldn't create the transaction. Please include a clear amount and description.")
+                    : t(language,
+                        "Không thể lưu giao dịch: ",
+                        "Couldn't save transaction: ") + errors.get(0);
             return AiAssistantResponse.builder()
                     .intent("INSERT")
                     .refreshRequired(false)
@@ -245,7 +308,9 @@ public class AiAssistantService {
         }
 
         StringBuilder reply = new StringBuilder();
-        reply.append("Đã lưu ").append(createdCount).append(" giao dịch.");
+        reply.append(t(language, "Đã lưu ", "Saved "))
+             .append(createdCount)
+             .append(t(language, " giao dịch.", " transaction(s)."));
         if (!savedLines.isEmpty()) {
             reply.append("\n").append(String.join("\n", savedLines));
         }
@@ -258,7 +323,7 @@ public class AiAssistantService {
                 .build();
     }
 
-    private AiAssistantResponse handleQuery(AiParseResult parsed) {
+    private AiAssistantResponse handleQuery(AiParseResult parsed, String language) {
         AiParsedQuery q = parsed.query != null ? parsed.query : new AiParsedQuery();
 
         LocalDate today = LocalDate.now();
@@ -285,8 +350,9 @@ public class AiAssistantService {
         }
 
         if (q.categoryName != null && !q.categoryName.isBlank()) {
+            String normalizedCategory = normalizeCategoryName(q.categoryName);
             Map<String, Long> nameToId = getNameToIdMap();
-            Long catId = resolveCategoryId(nameToId, q.categoryName, null);
+            Long catId = resolveCategoryId(nameToId, normalizedCategory, null);
             if (catId != null) {
                 Long finalCatId = catId;
                 entries = entries.stream()
@@ -298,45 +364,63 @@ public class AiAssistantService {
         if (entries.isEmpty()) {
             return AiAssistantResponse.builder()
                     .intent("QUERY")
-                    .reply("Không có giao dịch nào trong khoảng thời gian này.")
+                    .reply(t(language,
+                            "Không có giao dịch nào trong khoảng thời gian này.",
+                            "No transactions found in this period."))
                     .build();
         }
 
         String metric = q.metric == null ? "TOTAL" : q.metric.toUpperCase(Locale.ROOT);
         switch (metric) {
             case "TOP_CATEGORY":
-                return buildTopCategoryReply(start, end, entries);
+                return buildTopCategoryReply(start, end, entries, language);
             case "LIST":
-                return buildListReply(start, end, entries, q.limit);
+                return buildListReply(start, end, entries, q.limit, language);
             case "AVERAGE":
-                return buildAverageReply(start, end, entries);
+                return buildAverageReply(start, end, entries, typeFilter, language);
             case "TREND":
-                return buildTrendReply(start, end, typeFilter);
+                return buildTrendReply(start, end, typeFilter, language);
             case "PERCENTAGE":
-                return buildPercentageReply(start, end, entries);
+                return buildPercentageReply(start, end, entries, language);
             case "TOTAL":
             default:
-                return buildTotalReply(start, end, entries, typeFilter);
+                return buildTotalReply(start, end, entries, typeFilter, language);
         }
     }
 
     private AiAssistantResponse buildAverageReply(LocalDate start, LocalDate end,
-            List<com.example.finance_backend.entity.FinancialEntry> entries) {
+            List<com.example.finance_backend.entity.FinancialEntry> entries,
+            String typeFilter,
+            String language) {
         BigDecimal total = entries.stream()
                 .map(com.example.finance_backend.entity.FinancialEntry::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         long days = Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1);
         BigDecimal average = total.divide(new BigDecimal(days), 0, RoundingMode.HALF_UP);
-
-        String reply = String.format("Trong khoảng từ %s đến %s (%d ngày), trung bình mỗi ngày bạn chi %s.",
-                start.format(DATE_FMT), end.format(DATE_FMT), days, formatVnd(average));
+        String reply;
+        if ("ALL".equals(typeFilter)) {
+            reply = isEnglish(language)
+                    ? String.format("From %s to %s (%d days), your average daily total is %s.",
+                            start.format(DATE_FMT), end.format(DATE_FMT), days, formatVnd(average, language))
+                    : String.format("Trong khoảng từ %s đến %s (%d ngày), trung bình mỗi ngày tổng giao dịch là %s.",
+                            start.format(DATE_FMT), end.format(DATE_FMT), days, formatVnd(average, language));
+        } else {
+            String verb = "INCOME".equals(typeFilter)
+                    ? t(language, "thu", "income")
+                    : t(language, "chi", "spending");
+            reply = isEnglish(language)
+                    ? String.format("From %s to %s (%d days), your average daily %s is %s.",
+                            start.format(DATE_FMT), end.format(DATE_FMT), days, verb, formatVnd(average, language))
+                    : String.format("Trong khoảng từ %s đến %s (%d ngày), trung bình mỗi ngày bạn %s %s.",
+                            start.format(DATE_FMT), end.format(DATE_FMT), days, verb, formatVnd(average, language));
+        }
         return AiAssistantResponse.builder()
                 .intent("QUERY")
                 .reply(reply)
                 .build();
     }
 
-    private AiAssistantResponse buildTrendReply(LocalDate start, LocalDate end, String typeFilter) {
+    private AiAssistantResponse buildTrendReply(LocalDate start, LocalDate end, String typeFilter, String language) {
         long days = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
         LocalDate prevStart = start.minusDays(days);
         LocalDate prevEnd = start.minusDays(1);
@@ -357,23 +441,32 @@ public class AiAssistantService {
         BigDecimal prevTotal = prevEntries.stream().map(com.example.finance_backend.entity.FinancialEntry::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        String label = "INCOME".equals(typeFilter) ? "thu" : "chi";
-        String trend = "không đổi";
+        String label;
+        if ("ALL".equals(typeFilter)) {
+            label = t(language, "giao dịch", "transactions");
+        } else {
+            label = "INCOME".equals(typeFilter) ? t(language, "thu", "income") : t(language, "chi", "expense");
+        }
+        String trend = t(language, "không đổi", "no change");
         if (prevTotal.compareTo(BigDecimal.ZERO) > 0) {
             BigDecimal diff = currentTotal.subtract(prevTotal);
             BigDecimal percent = diff.multiply(new BigDecimal("100")).divide(prevTotal, 1, RoundingMode.HALF_UP);
             if (diff.compareTo(BigDecimal.ZERO) > 0) {
-                trend = "tăng " + percent + "%";
+                trend = t(language, "tăng " + percent + "%", "up " + percent + "%");
             } else if (diff.compareTo(BigDecimal.ZERO) < 0) {
-                trend = "giảm " + percent.abs() + "%";
+                trend = t(language, "giảm " + percent.abs() + "%", "down " + percent.abs() + "%");
             }
         } else if (currentTotal.compareTo(BigDecimal.ZERO) > 0) {
-            trend = "mới phát sinh";
+            trend = t(language, "mới phát sinh", "new activity");
         }
 
-        String reply = String.format("So với giai đoạn trước (%s đến %s), tổng %s của bạn %s. (Hiện tại: %s, Trước đó: %s)",
-                prevStart.format(DATE_FMT), prevEnd.format(DATE_FMT), label, trend, formatVnd(currentTotal),
-                formatVnd(prevTotal));
+        String reply = isEnglish(language)
+                ? String.format("Compared to the previous period (%s to %s), your total %s is %s. (Current: %s, Previous: %s)",
+                        prevStart.format(DATE_FMT), prevEnd.format(DATE_FMT), label, trend,
+                        formatVnd(currentTotal, language), formatVnd(prevTotal, language))
+                : String.format("So với giai đoạn trước (%s đến %s), tổng %s của bạn %s. (Hiện tại: %s, Trước đó: %s)",
+                        prevStart.format(DATE_FMT), prevEnd.format(DATE_FMT), label, trend,
+                        formatVnd(currentTotal, language), formatVnd(prevTotal, language));
         return AiAssistantResponse.builder()
                 .intent("QUERY")
                 .reply(reply)
@@ -381,13 +474,17 @@ public class AiAssistantService {
     }
 
     private AiAssistantResponse buildPercentageReply(LocalDate start, LocalDate end,
-            List<com.example.finance_backend.entity.FinancialEntry> entries) {
+            List<com.example.finance_backend.entity.FinancialEntry> entries,
+            String language) {
         BigDecimal total = entries.stream()
                 .map(com.example.finance_backend.entity.FinancialEntry::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         if (total.compareTo(BigDecimal.ZERO) <= 0) {
-            return AiAssistantResponse.builder().intent("QUERY").reply("Không có dữ liệu để tính tỷ lệ.").build();
+            return AiAssistantResponse.builder()
+                    .intent("QUERY")
+                    .reply(t(language, "Không có dữ liệu để tính tỷ lệ.", "No data available to calculate percentages."))
+                    .build();
         }
 
         Map<Long, BigDecimal> catTotals = new HashMap<>();
@@ -397,14 +494,18 @@ public class AiAssistantService {
 
         Map<Long, String> idToName = categoryService.getIdToNameMap();
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Tỷ lệ chi tiêu từ %s đến %s:\n", start.format(DATE_FMT), end.format(DATE_FMT)));
+        sb.append(isEnglish(language)
+                ? String.format("Spending breakdown from %s to %s:\n", start.format(DATE_FMT), end.format(DATE_FMT))
+                : String.format("Tỷ lệ chi tiêu từ %s đến %s:\n", start.format(DATE_FMT), end.format(DATE_FMT)));
 
         catTotals.entrySet().stream()
                 .sorted(Map.Entry.<Long, BigDecimal>comparingByValue().reversed())
                 .forEach(entry -> {
                     BigDecimal pct = entry.getValue().multiply(new BigDecimal("100")).divide(total, 1, RoundingMode.HALF_UP);
-                    sb.append(String.format("- %s: %s%% (%s)\n", idToName.getOrDefault(entry.getKey(), "Khác"), pct,
-                            formatVnd(entry.getValue())));
+                    sb.append(String.format("- %s: %s%% (%s)\n",
+                            idToName.getOrDefault(entry.getKey(), "Khác"),
+                            pct,
+                            formatVnd(entry.getValue(), language)));
                 });
 
         return AiAssistantResponse.builder()
@@ -413,13 +514,23 @@ public class AiAssistantService {
                 .build();
     }
 
-    private AiAssistantResponse handleUpdate(AiParseResult parsed, String originalMessage, Long forcedAccountId) {
+    private AiAssistantResponse handleUpdate(AiParseResult parsed, String originalMessage, Long forcedAccountId, String language) {
         List<com.example.finance_backend.entity.FinancialEntry> targets = findTargetEntries(parsed.target);
         if (targets.isEmpty()) {
-            return AiAssistantResponse.builder().intent("UPDATE").reply("Mình không tìm thấy giao dịch nào khớp để sửa.").build();
+            return AiAssistantResponse.builder()
+                    .intent("UPDATE")
+                    .reply(t(language,
+                            "Mình không tìm thấy giao dịch nào khớp để sửa.",
+                            "I couldn't find a matching transaction to update."))
+                    .build();
         }
         if (targets.size() > 1) {
-            return AiAssistantResponse.builder().intent("UPDATE").reply("Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: ngày hoặc số tiền cụ thể).").build();
+            return AiAssistantResponse.builder()
+                    .intent("UPDATE")
+                    .reply(t(language,
+                            "Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: ngày hoặc số tiền cụ thể).",
+                            "Multiple transactions match. Please be more specific (e.g., date or amount)."))
+                    .build();
         }
 
         com.example.finance_backend.entity.FinancialEntry entry = targets.get(0);
@@ -427,7 +538,8 @@ public class AiAssistantService {
 
         if (newData == null) {
             // Thử cứu vãn (salvage) dữ liệu nếu Gemini hụt nhưng message có pattern "thành"
-            String[] parts = originalMessage.toLowerCase(VI_LOCALE).split("\\b(thanh|thành|sang|thay|den|đến)\\b");
+            String[] parts = originalMessage.toLowerCase(VI_LOCALE)
+                    .split("\\b(thanh|thành|sang|thay|den|đến|to|into|as)\\b");
             if (parts.length >= 2) {
                 newData = new AiParsedEntry();
                 newData.amount = extractAmount(parts[1]);
@@ -446,7 +558,12 @@ public class AiAssistantService {
         }
 
         if (newData == null) {
-            return AiAssistantResponse.builder().intent("UPDATE").reply("Bạn muốn sửa thông tin gì của giao dịch này?").build();
+            return AiAssistantResponse.builder()
+                    .intent("UPDATE")
+                    .reply(t(language,
+                            "Bạn muốn sửa thông tin gì của giao dịch này?",
+                            "What would you like to update for this transaction?"))
+                    .build();
         }
 
         if (newData.amount != null) entry.setAmount(newData.amount);
@@ -456,6 +573,7 @@ public class AiAssistantService {
              if (d != null) entry.setTransactionDate(d);
         }
         if (newData.categoryName != null && !newData.categoryName.isBlank()) {
+            newData.categoryName = normalizeCategoryName(newData.categoryName);
             Map<String, Long> nameToId = getNameToIdMap();
             Long catId = resolveCategoryId(nameToId, newData.categoryName, entry.getCategoryId());
             entry.setCategoryId(catId);
@@ -465,27 +583,43 @@ public class AiAssistantService {
         return AiAssistantResponse.builder()
                 .intent("UPDATE")
                 .refreshRequired(true)
-                .reply("Đã cập nhật giao dịch: " + formatVnd(entry.getAmount()) + " - " + entry.getNote())
+                .reply(t(language,
+                        "Đã cập nhật giao dịch: " + formatVnd(entry.getAmount(), language) + " - " + entry.getNote(),
+                        "Updated transaction: " + formatVnd(entry.getAmount(), language) + " - " + entry.getNote()))
                 .build();
     }
 
-    private AiAssistantResponse handleDelete(AiParseResult parsed, String originalMessage) {
+    private AiAssistantResponse handleDelete(AiParseResult parsed, String originalMessage, String language) {
         List<com.example.finance_backend.entity.FinancialEntry> targets = findTargetEntries(parsed.target);
         if (targets.isEmpty()) {
-            return AiAssistantResponse.builder().intent("DELETE").reply("Mình không tìm thấy giao dịch nào khớp để xóa.").build();
+            return AiAssistantResponse.builder()
+                    .intent("DELETE")
+                    .reply(t(language,
+                            "Mình không tìm thấy giao dịch nào khớp để xóa.",
+                            "I couldn't find a matching transaction to delete."))
+                    .build();
         }
 
         boolean deleteAll = parsed.target != null && Boolean.TRUE.equals(parsed.target.deleteAll);
         if (!deleteAll && targets.size() > 1) {
-            return AiAssistantResponse.builder().intent("DELETE").reply("Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: 'Xóa tất cả' hoặc số tiền cụ thể).").build();
+            return AiAssistantResponse.builder()
+                    .intent("DELETE")
+                    .reply(t(language,
+                            "Có nhiều giao dịch khớp, bạn hãy nói rõ hơn (ví dụ: 'Xóa tất cả' hoặc số tiền cụ thể).",
+                            "Multiple transactions match. Please be more specific (e.g., 'delete all' or a specific amount)."))
+                    .build();
         }
 
         int deletedCount = targets.size();
         entryRepository.deleteAll(targets);
 
-        String reply = deletedCount == 1 
-            ? "Đã xóa giao dịch: " + formatVnd(targets.get(0).getAmount()) + " - " + targets.get(0).getNote()
-            : "Đã xóa " + deletedCount + " giao dịch khớp với yêu cầu.";
+        String reply = deletedCount == 1
+            ? t(language,
+                "Đã xóa giao dịch: " + formatVnd(targets.get(0).getAmount(), language) + " - " + targets.get(0).getNote(),
+                "Deleted transaction: " + formatVnd(targets.get(0).getAmount(), language) + " - " + targets.get(0).getNote())
+            : t(language,
+                "Đã xóa " + deletedCount + " giao dịch khớp với yêu cầu.",
+                "Deleted " + deletedCount + " matching transactions.");
 
         return AiAssistantResponse.builder()
                 .intent("DELETE")
@@ -494,8 +628,12 @@ public class AiAssistantService {
                 .build();
     }
 
-    private AiAssistantResponse handleAdvice(AiParseResult parsed) {
-        String reply = parsed.adviceReply != null ? parsed.adviceReply : "Mình có thể giúp gì cho bạn về quản lý tài chính?";
+    private AiAssistantResponse handleAdvice(AiParseResult parsed, String language) {
+        String reply = parsed.adviceReply != null
+                ? parsed.adviceReply
+                : t(language,
+                    "Mình có thể giúp gì cho bạn về quản lý tài chính?",
+                    "How can I help you with personal finance?");
         return AiAssistantResponse.builder()
                 .intent("ADVICE")
                 .reply(reply)
@@ -504,6 +642,7 @@ public class AiAssistantService {
 
     private List<com.example.finance_backend.entity.FinancialEntry> findTargetEntries(AiParsedTarget target) {
         if (target == null) return List.of();
+        String normalizedTargetCategory = target.categoryName != null ? normalizeCategoryName(target.categoryName) : null;
         LocalDate searchDate = parseDate(target.date, null);
         
         // Nếu không có ngày cụ thể, mở rộng phạm vi ra 30 ngày để dễ tìm hơn
@@ -521,7 +660,7 @@ public class AiAssistantService {
                         String keywords = normalizeText(target.noteKeywords.toLowerCase(VI_LOCALE));
                         
                         // Loại bỏ STOP WORDS
-                        keywords = keywords.replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật|thanh|thành|sang|thay|den|đến|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi)\\b", "")
+                        keywords = keywords.replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật|thanh|thành|sang|thay|den|đến|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi|update|change|edit|set|delete|remove|transaction|entry|this|that|all|everything|today|yesterday|day|month|year|wallet|money|expense|income|spend|spent|buy|payment|pay|recent)\\b", "")
                                         .replaceAll("\\s+", " ")
                                         .trim();
                         
@@ -532,9 +671,9 @@ public class AiAssistantService {
                                         
                         if (!keywords.isBlank() && !note.contains(keywords)) return false;
                     }
-                    if (target.categoryName != null && !target.categoryName.isBlank()) {
+                    if (normalizedTargetCategory != null && !normalizedTargetCategory.isBlank()) {
                         String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "").toLowerCase(VI_LOCALE);
-                        if (!catName.contains(target.categoryName.toLowerCase(VI_LOCALE))) return false;
+                        if (!catName.contains(normalizedTargetCategory.toLowerCase(VI_LOCALE))) return false;
                     }
                     return true;
                 })
@@ -543,17 +682,30 @@ public class AiAssistantService {
 
     private AiAssistantResponse buildTotalReply(LocalDate start, LocalDate end,
             List<com.example.finance_backend.entity.FinancialEntry> entries,
-            String typeFilter) {
+            String typeFilter,
+            String language) {
         BigDecimal total = entries.stream()
                 .map(com.example.finance_backend.entity.FinancialEntry::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        String label = "ALL".equals(typeFilter) ? "Tổng giao dịch"
-                : ("INCOME".equals(typeFilter) ? "Tổng thu" : "Tổng chi");
-        String reply = String.format("%s từ %s đến %s là %s.",
-                label,
-                start.format(DATE_FMT),
-                end.format(DATE_FMT),
-                formatVnd(total));
+        String label;
+        if ("ALL".equals(typeFilter)) {
+            label = t(language, "Tổng giao dịch", "Total transactions");
+        } else {
+            label = "INCOME".equals(typeFilter)
+                    ? t(language, "Tổng thu", "Total income")
+                    : t(language, "Tổng chi", "Total expense");
+        }
+        String reply = isEnglish(language)
+                ? String.format("%s from %s to %s is %s.",
+                    label,
+                    start.format(DATE_FMT),
+                    end.format(DATE_FMT),
+                    formatVnd(total, language))
+                : String.format("%s từ %s đến %s là %s.",
+                    label,
+                    start.format(DATE_FMT),
+                    end.format(DATE_FMT),
+                    formatVnd(total, language));
         return AiAssistantResponse.builder()
                 .intent("QUERY")
                 .reply(reply)
@@ -561,7 +713,8 @@ public class AiAssistantService {
     }
 
     private AiAssistantResponse buildTopCategoryReply(LocalDate start, LocalDate end,
-            List<com.example.finance_backend.entity.FinancialEntry> entries) {
+            List<com.example.finance_backend.entity.FinancialEntry> entries,
+            String language) {
         Map<Long, BigDecimal> totals = new HashMap<>();
         for (var e : entries) {
             totals.merge(e.getCategoryId(), e.getAmount(), BigDecimal::add);
@@ -571,16 +724,24 @@ public class AiAssistantService {
         if (max.isEmpty()) {
             return AiAssistantResponse.builder()
                     .intent("QUERY")
-                    .reply("Chưa có dữ liệu để tính nhóm chi tiêu lớn nhất.")
+                    .reply(t(language,
+                            "Chưa có dữ liệu để tính nhóm chi tiêu lớn nhất.",
+                            "No data available to determine the top spending category."))
                     .build();
         }
         Long catId = max.get().getKey();
         String catName = categoryService.getIdToNameMap().getOrDefault(catId, "Khác");
-        String reply = String.format("Trong khoảng %s đến %s, bạn chi nhiều nhất vào %s: %s.",
-                start.format(DATE_FMT),
-                end.format(DATE_FMT),
-                catName,
-                formatVnd(max.get().getValue()));
+        String reply = isEnglish(language)
+                ? String.format("From %s to %s, you spent the most on %s: %s.",
+                        start.format(DATE_FMT),
+                        end.format(DATE_FMT),
+                        catName,
+                        formatVnd(max.get().getValue(), language))
+                : String.format("Trong khoảng %s đến %s, bạn chi nhiều nhất vào %s: %s.",
+                        start.format(DATE_FMT),
+                        end.format(DATE_FMT),
+                        catName,
+                        formatVnd(max.get().getValue(), language));
         return AiAssistantResponse.builder()
                 .intent("QUERY")
                 .reply(reply)
@@ -589,17 +750,20 @@ public class AiAssistantService {
 
     private AiAssistantResponse buildListReply(LocalDate start, LocalDate end,
             List<com.example.finance_backend.entity.FinancialEntry> entries,
-            Integer limit) {
+            Integer limit,
+            String language) {
         int max = (limit == null || limit <= 0) ? 10 : Math.min(limit, 20);
         List<com.example.finance_backend.entity.FinancialEntry> slice = entries.stream()
                 .limit(max)
                 .collect(Collectors.toList());
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Danh sách giao dịch từ %s đến %s:\n", start.format(DATE_FMT), end.format(DATE_FMT)));
+        sb.append(isEnglish(language)
+                ? String.format("Transactions from %s to %s:\n", start.format(DATE_FMT), end.format(DATE_FMT))
+                : String.format("Danh sách giao dịch từ %s đến %s:\n", start.format(DATE_FMT), end.format(DATE_FMT)));
         for (var e : slice) {
             String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "Khác");
             String note = e.getNote() != null ? e.getNote() : "";
-            sb.append(String.format("- %s • %s", formatVnd(e.getAmount()), catName));
+            sb.append(String.format("- %s • %s", formatVnd(e.getAmount(), language), catName));
             if (!note.isBlank()) {
                 sb.append(" (").append(trimNote(note)).append(")");
             }
@@ -611,13 +775,79 @@ public class AiAssistantService {
                 .build();
     }
 
-    private String buildPrompt(String message, List<AiMessage> history) {
+    private String buildPrompt(String message, List<AiMessage> history, String language) {
         LocalDate today = LocalDate.now();
         List<String> categories = categoryService.findAll().stream()
                 .map(c -> c.getName())
                 .collect(Collectors.toList());
         String categoriesStr = String.join(", ", categories);
-        String historyBlock = formatHistory(history);
+        String historyBlock = formatHistory(history, language);
+
+        if (isEnglish(language)) {
+            return """
+                    You are an AI assistant for a personal finance app. Analyze the user's intent and extract data.
+                    Today is %s (Asia/Ho_Chi_Minh).
+                    Valid categories: %s.
+                    Conversation history (chronological, role USER/ASSISTANT):
+                    %s
+
+                    OUTPUT REQUIREMENTS:
+                    - Return raw JSON only, no markdown or extra text.
+                    - Always use YYYY-MM-DD date format.
+                    - Determine intent: INSERT (add), QUERY (query), UPDATE (edit), DELETE (delete), ADVICE (general advice/Q&A).
+                    - If ADVICE, fill "adviceReply" with an English answer.
+                    - For UPDATE/DELETE, use "target" to identify the transaction (amount, date, old category). Use "entries[0]" for new values (if UPDATE).
+                    - If the user wants to delete all transactions in a time range/condition, set "target.deleteAll = true".
+                    - If the user uses English category names, map them to the closest category from the list above and output that category name exactly.
+
+                    SCHEMA:
+                    {
+                      "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "UNKNOWN",
+                      "adviceReply": "string (only for ADVICE)",
+                      "query": {
+                        "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE",
+                        "type": "EXPENSE" | "INCOME" | "ALL",
+                        "startDate": "YYYY-MM-DD",
+                        "endDate": "YYYY-MM-DD",
+                        "limit": 10,
+                        "categoryName": "string"
+                      },
+                      "target": {
+                        "amount": 45000,
+                        "categoryName": "Ăn uống",
+                        "date": "YYYY-MM-DD",
+                        "noteKeywords": "pho",
+                        "deleteAll": false
+                      },
+                      "entries": [
+                        {
+                          "amount": 45000,
+                          "categoryName": "Ăn uống",
+                          "note": "Pho",
+                          "type": "EXPENSE",
+                          "date": "YYYY-MM-DD"
+                        }
+                      ]
+                    }
+
+                    UPDATE/DELETE EXAMPLES:
+                    - "Change yesterday's lunch to 50k": intent=UPDATE, target={amount: null, noteKeywords: "lunch", date: "yesterday"}, entries=[{amount: 50000}]
+                    - "Delete the 45k transaction": intent=DELETE, target={amount: 45000}
+                    - "Delete all transactions today": intent=DELETE, target={date: "today", deleteAll: true}
+                    - "Delete the 50k gas transaction": intent=DELETE, target={amount: 50000, noteKeywords: "gas"} (DO NOT choose INSERT/QUERY if the message contains "delete/remove")
+
+                    ADVANCED QUERY EXAMPLES:
+                    - "Average daily spending this month": metric=AVERAGE
+                    - "Did my spending increase compared to last month": metric=TREND
+                    - "Spending by category percentage": metric=PERCENTAGE
+
+                    ADVICE EXAMPLE:
+                    - "How can I save money?": intent=ADVICE, adviceReply="To save money, you should..."
+
+                    INPUT:
+                    %s
+                    """.formatted(today.format(DATE_FMT), categoriesStr, historyBlock, message);
+        }
 
         return """
                 Bạn là trợ lý AI cho ứng dụng quản lý chi tiêu. Hãy phân tích ý định và trích xuất dữ liệu.
@@ -750,9 +980,11 @@ public class AiAssistantService {
         }
     }
 
-    private static String formatVnd(BigDecimal value) {
+    private static String formatVnd(BigDecimal value, String language) {
         BigDecimal normalized = value == null ? BigDecimal.ZERO : value.setScale(0, RoundingMode.HALF_UP);
-        return NumberFormat.getInstance(VI_LOCALE).format(normalized) + " đ";
+        Locale locale = isEnglish(language) ? EN_LOCALE : VI_LOCALE;
+        String suffix = isEnglish(language) ? " VND" : " đ";
+        return NumberFormat.getInstance(locale).format(normalized) + suffix;
     }
 
     private static String trimNote(String note) {
@@ -764,7 +996,7 @@ public class AiAssistantService {
         return trimmed.substring(0, 77) + "...";
     }
 
-    private AccountResolution resolveAccount(String message, Long forcedAccountId, Long userId) {
+    private AccountResolution resolveAccount(String message, Long forcedAccountId, Long userId, String language) {
         List<Account> accounts = (userId != null)
                 ? accountRepository.findByUserIdOrderByNameAsc(userId)
                 : accountRepository.findAll();
@@ -776,7 +1008,9 @@ public class AiAssistantService {
             if (exists) {
                 return AccountResolution.selected(forcedAccountId);
             }
-            return AccountResolution.error("Ví/tài khoản không tồn tại.");
+            return AccountResolution.error(t(language,
+                    "Ví/tài khoản không tồn tại.",
+                    "Wallet/account does not exist."));
         }
         if (accounts.size() == 1) {
             return AccountResolution.selected(accounts.get(0).getId());
@@ -828,9 +1062,9 @@ public class AiAssistantService {
                 .build());
     }
 
-    private static String formatHistory(List<AiMessage> history) {
+    private static String formatHistory(List<AiMessage> history, String language) {
         if (history == null || history.isEmpty())
-            return "Không có.";
+            return t(language, "Không có.", "None.");
         StringBuilder sb = new StringBuilder();
         for (AiMessage m : history) {
             String role = m.getRole() != null ? m.getRole().toUpperCase(Locale.ROOT) : "USER";
@@ -847,7 +1081,8 @@ public class AiAssistantService {
             return true;
         return containsAny(normalized, List.of(
                 "con hom qua", "cai nao", "nhieu nhat", "luc nao", "con nua", "con khong",
-                "hom qua", "hom nay"));
+                "hom qua", "hom nay",
+                "yesterday", "today", "which one", "most", "any more", "anything else"));
     }
 
     private static String lastUserMessage(List<AiMessage> history) {
@@ -864,8 +1099,46 @@ public class AiAssistantService {
         if (name == null)
             return null;
         String trimmed = name.trim();
-        if (trimmed.equalsIgnoreCase("Nạp ví") || trimmed.equalsIgnoreCase("Nap vi")) {
+        String normalized = normalizeText(trimmed.toLowerCase(Locale.ROOT));
+        if (normalized.equals("nap vi") || normalized.equals("nap tien") || normalized.equals("top up")
+                || normalized.equals("topup") || normalized.equals("deposit") || normalized.equals("income")
+                || normalized.equals("salary") || normalized.equals("wage") || normalized.equals("bonus")
+                || normalized.equals("refund") || normalized.equals("cashback") || normalized.equals("transfer in")) {
             return "Nạp tiền";
+        }
+        if (normalized.equals("food") || normalized.equals("meal") || normalized.equals("lunch")
+                || normalized.equals("dinner") || normalized.equals("breakfast") || normalized.equals("restaurant")
+                || normalized.equals("coffee") || normalized.equals("tea") || normalized.equals("drink")
+                || normalized.equals("milk tea") || normalized.equals("snack")) {
+            return "Ăn uống";
+        }
+        if (normalized.equals("parking")) {
+            return "Gửi xe";
+        }
+        if (normalized.equals("gas") || normalized.equals("gasoline") || normalized.equals("petrol")
+                || normalized.equals("fuel") || normalized.equals("transport") || normalized.equals("transportation")
+                || normalized.equals("taxi") || normalized.equals("uber") || normalized.equals("grab")) {
+            return "Xăng xe";
+        }
+        if (normalized.equals("shopping") || normalized.equals("groceries") || normalized.equals("supermarket")
+                || normalized.equals("mall") || normalized.equals("clothes") || normalized.equals("purchase") || normalized.equals("buy")) {
+            return "Mua sắm";
+        }
+        if (normalized.equals("entertainment") || normalized.equals("movie") || normalized.equals("cinema")
+                || normalized.equals("netflix") || normalized.equals("game") || normalized.equals("gift")
+                || normalized.equals("present") || normalized.equals("birthday")) {
+            return "Giải trí";
+        }
+        if (normalized.equals("health") || normalized.equals("medical") || normalized.equals("hospital")
+                || normalized.equals("medicine") || normalized.equals("pharmacy")) {
+            return "Y tế";
+        }
+        if (normalized.equals("education") || normalized.equals("school") || normalized.equals("tuition")
+                || normalized.equals("book") || normalized.equals("course") || normalized.equals("study")) {
+            return "Giáo dục";
+        }
+        if (normalized.equals("other") || normalized.equals("others")) {
+            return "Khác";
         }
         return trimmed;
     }
@@ -876,11 +1149,16 @@ public class AiAssistantService {
             return null;
 
         String normalized = normalizeText(lower);
-        boolean isDelete = containsAny(normalized, List.of("xoa", "huy", "bo qua"));
-        boolean isUpdate = containsAny(normalized, List.of("sua", "doi", "cap nhat", "thanh"));
-        boolean isAll = normalized.contains("tat ca") || normalized.contains("het");
+        boolean isDelete = containsAny(normalized, List.of(
+                "xoa", "huy", "bo qua",
+                "delete", "remove", "erase", "clear", "cancel"));
+        boolean isUpdate = containsAny(normalized, List.of(
+                "sua", "doi", "cap nhat", "thanh",
+                "update", "change", "edit", "set", "replace"));
+        boolean isAll = normalized.contains("tat ca") || normalized.contains("het")
+                || normalized.contains("all") || normalized.contains("everything");
 
-        if (isDelete && !normalized.contains("bao nhieu")) { // Tránh nhầm với Query kiểu "Tuần này xóa bao nhiêu" (nếu có)
+        if (isDelete && !normalized.contains("bao nhieu") && !normalized.contains("how much") && !normalized.contains("how many")) {
             AiParseResult result = new AiParseResult();
             result.intent = "DELETE";
             result.target = new AiParsedTarget();
@@ -892,7 +1170,7 @@ public class AiAssistantService {
             // Nếu là xóa tất cả, không cần trích xuất keyword từ nội dung
             if (!isAll) {
                 // Thử trích xuất keyword: bỏ đi các từ chỉ lệnh và ngày tháng
-                String kw = lower.replaceAll("\\b(xoa|huy|bo|giup|giao dich|khoan|cai|nay|hom nay|hom qua|ngay|thang|nam|vi|momo)\\b", "")
+                String kw = lower.replaceAll("\\b(xoa|huy|bo|giup|giao dich|khoan|cai|nay|hom nay|hom qua|ngay|thang|nam|vi|momo|delete|remove|transaction|entry|this|that|today|yesterday|day|month|year|wallet)\\b", "")
                                  .replaceAll("\\s+", " ")
                                  .trim();
                 // Bỏ tiền ra khỏi keyword nếu có
@@ -909,7 +1187,10 @@ public class AiAssistantService {
 
         boolean isQuery = containsAny(normalized, List.of(
                 "bao nhieu", "tong", "thong ke", "nhieu nhat", "cao nhat",
-                "danh sach", "liet ke", "thang nay", "thang truoc", "hom nay", "hom qua", "nam nay"));
+                "danh sach", "liet ke", "thang nay", "thang truoc", "hom nay", "hom qua", "nam nay",
+                "how much", "total", "summary", "most", "highest", "list", "show",
+                "this month", "last month", "today", "yesterday", "this year", "last year", "this week", "last week",
+                "average", "trend", "percent", "percentage", "ratio"));
 
         BigDecimal amount = extractAmount(lower);
         if (amount == null && !isQuery)
@@ -939,7 +1220,7 @@ public class AiAssistantService {
                 res.target = new AiParsedTarget();
                 
                 // Thử tách chuỗi dựa trên các từ khóa chuyển đổi (bao gồm cả tiếng Việt có dấu)
-                String[] parts = lower.split("\\b(thanh|thành|sang|thay|den|đến)\\b");
+                String[] parts = lower.split("\\b(thanh|thành|sang|thay|den|đến|to|into|as)\\b");
                 if (parts.length >= 2) {
                     // Phần 1 là thông tin cũ
                     BigDecimal oldAmount = extractAmount(parts[0]);
@@ -1001,10 +1282,16 @@ public class AiAssistantService {
     }
 
     private static String detectMetric(String normalized) {
-        if (containsAny(normalized, List.of("nhieu nhat", "cao nhat")))
+        if (containsAny(normalized, List.of("nhieu nhat", "cao nhat", "most", "highest", "top")))
             return "TOP_CATEGORY";
-        if (containsAny(normalized, List.of("danh sach", "liet ke")))
+        if (containsAny(normalized, List.of("danh sach", "liet ke", "list", "show", "detail", "details")))
             return "LIST";
+        if (containsAny(normalized, List.of("trung binh", "average", "avg", "per day")))
+            return "AVERAGE";
+        if (containsAny(normalized, List.of("xu huong", "tang", "giam", "trend", "increase", "decrease", "compared")))
+            return "TREND";
+        if (containsAny(normalized, List.of("ty le", "phan tram", "percentage", "percent", "ratio")))
+            return "PERCENTAGE";
         return "TOTAL";
     }
 
@@ -1012,9 +1299,10 @@ public class AiAssistantService {
         if (containsAny(normalized, List.of(
                 "thu", "thu nhap", "luong", "thuong", "nhan tien",
                 "nap", "nap tien", "nap vao", "vao vi", "chuyen vao", "tien ve",
-                "hoan tien", "refund", "nap vi")))
+                "hoan tien", "refund", "nap vi",
+                "income", "salary", "wage", "bonus", "receive", "received", "deposit", "top up", "topup", "transfer in", "cashback")))
             return "INCOME";
-        if (containsAny(normalized, List.of("chi", "tieu", "mua")))
+        if (containsAny(normalized, List.of("chi", "tieu", "mua", "expense", "spend", "spent", "buy", "purchase", "pay", "payment")))
             return "EXPENSE";
         return "EXPENSE";
     }
@@ -1033,34 +1321,52 @@ public class AiAssistantService {
     }
 
     private static DateRange detectDateRange(String normalized, LocalDate today) {
-        if (normalized.contains("hom nay") || normalized.contains("vua nay") || normalized.contains("vua moi") || 
-            normalized.contains("chieu nay") || normalized.contains("sang nay") || normalized.contains("toi nay")) {
+        if (normalized.contains("hom nay") || normalized.contains("vua nay") || normalized.contains("vua moi") ||
+            normalized.contains("chieu nay") || normalized.contains("sang nay") || normalized.contains("toi nay") ||
+            normalized.contains("today") || normalized.contains("this morning") || normalized.contains("this afternoon") ||
+            normalized.contains("this evening") || normalized.contains("tonight")) {
             return new DateRange(today, today);
         }
-        if (normalized.contains("hom qua")) {
+        if (normalized.contains("hom qua") || normalized.contains("yesterday")) {
             LocalDate d = today.minusDays(1);
             return new DateRange(d, d);
         }
-        if (normalized.contains("thang nay")) {
+        if (normalized.contains("this week")) {
+            LocalDate start = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            return new DateRange(start, today);
+        }
+        if (normalized.contains("last week")) {
+            LocalDate thisWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            LocalDate end = thisWeekStart.minusDays(1);
+            LocalDate start = end.minusDays(6);
+            return new DateRange(start, end);
+        }
+        if (normalized.contains("thang nay") || normalized.contains("this month") || normalized.contains("current month")) {
             LocalDate start = today.withDayOfMonth(1);
             return new DateRange(start, today);
         }
-        if (normalized.contains("thang truoc")) {
+        if (normalized.contains("thang truoc") || normalized.contains("last month") || normalized.contains("previous month")) {
             LocalDate prev = today.minusMonths(1);
             LocalDate start = prev.withDayOfMonth(1);
             LocalDate end = prev.withDayOfMonth(prev.lengthOfMonth());
             return new DateRange(start, end);
         }
-        if (normalized.contains("nam nay")) {
+        if (normalized.contains("nam nay") || normalized.contains("this year")) {
             LocalDate start = LocalDate.of(today.getYear(), 1, 1);
             return new DateRange(start, today);
+        }
+        if (normalized.contains("last year") || normalized.contains("previous year")) {
+            int year = today.getYear() - 1;
+            LocalDate start = LocalDate.of(year, 1, 1);
+            LocalDate end = LocalDate.of(year, 12, 31);
+            return new DateRange(start, end);
         }
         return null;
     }
 
     private static LocalDate detectSingleDate(String raw, LocalDate fallback) {
         if (raw == null) return fallback;
-        String normalized = normalizeText(raw.toLowerCase(VI_LOCALE));
+        String normalized = normalizeText(raw.toLowerCase(Locale.ROOT));
         LocalDate today = LocalDate.now();
         DateRange range = detectDateRange(normalized, today);
         if (range != null)
@@ -1130,26 +1436,79 @@ public class AiAssistantService {
         map.put("tra sua", "Ăn uống");
         map.put("ca phe", "Ăn uống");
         map.put("uong", "Ăn uống");
+        map.put("food", "Ăn uống");
+        map.put("meal", "Ăn uống");
+        map.put("lunch", "Ăn uống");
+        map.put("dinner", "Ăn uống");
+        map.put("breakfast", "Ăn uống");
+        map.put("restaurant", "Ăn uống");
+        map.put("coffee", "Ăn uống");
+        map.put("tea", "Ăn uống");
+        map.put("drink", "Ăn uống");
+        map.put("milk tea", "Ăn uống");
+        map.put("snack", "Ăn uống");
         map.put("xang", "Xăng xe");
         map.put("do xang", "Xăng xe");
         map.put("gas", "Xăng xe");
+        map.put("gasoline", "Xăng xe");
+        map.put("petrol", "Xăng xe");
+        map.put("fuel", "Xăng xe");
+        map.put("toll", "Xăng xe");
+        map.put("taxi", "Xăng xe");
+        map.put("uber", "Xăng xe");
+        map.put("grab", "Xăng xe");
+        map.put("transport", "Xăng xe");
+        map.put("transportation", "Xăng xe");
         map.put("mua", "Mua sắm");
         map.put("sam", "Mua sắm");
         map.put("sieu thi", "Mua sắm");
+        map.put("shopping", "Mua sắm");
+        map.put("groceries", "Mua sắm");
+        map.put("supermarket", "Mua sắm");
+        map.put("mall", "Mua sắm");
+        map.put("clothes", "Mua sắm");
+        map.put("purchase", "Mua sắm");
+        map.put("buy", "Mua sắm");
         map.put("giai tri", "Giải trí");
         map.put("phim", "Giải trí");
         map.put("game", "Giải trí");
         map.put("sinh nhat", "Giải trí");
         map.put("qua tang", "Giải trí");
+        map.put("entertainment", "Giải trí");
+        map.put("movie", "Giải trí");
+        map.put("cinema", "Giải trí");
+        map.put("netflix", "Giải trí");
+        map.put("gift", "Giải trí");
+        map.put("present", "Giải trí");
         map.put("y te", "Y tế");
         map.put("thuoc", "Y tế");
         map.put("benh vien", "Y tế");
+        map.put("health", "Y tế");
+        map.put("medical", "Y tế");
+        map.put("hospital", "Y tế");
+        map.put("medicine", "Y tế");
+        map.put("pharmacy", "Y tế");
         map.put("hoc", "Giáo dục");
         map.put("sach", "Giáo dục");
+        map.put("education", "Giáo dục");
+        map.put("school", "Giáo dục");
+        map.put("tuition", "Giáo dục");
+        map.put("book", "Giáo dục");
+        map.put("course", "Giáo dục");
+        map.put("study", "Giáo dục");
         map.put("nap vi", "Nạp tiền");
         map.put("nap tien", "Nạp tiền");
         map.put("thu nhap", "Nạp tiền");
         map.put("luong", "Nạp tiền");
+        map.put("income", "Nạp tiền");
+        map.put("salary", "Nạp tiền");
+        map.put("wage", "Nạp tiền");
+        map.put("bonus", "Nạp tiền");
+        map.put("deposit", "Nạp tiền");
+        map.put("top up", "Nạp tiền");
+        map.put("topup", "Nạp tiền");
+        map.put("cashback", "Nạp tiền");
+        map.put("transfer in", "Nạp tiền");
         map.put("gui xe", "Gửi xe");
         map.put("parking", "Gửi xe");
         map.put("thuong", "Nạp tiền");

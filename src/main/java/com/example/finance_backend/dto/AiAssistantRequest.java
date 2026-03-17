@@ -17,6 +17,9 @@ public class AiAssistantRequest {
 
     private Long accountId;
 
+    /** Language code from client (e.g., "vi", "en"). */
+    private String language;
+
     /** User ID from X-User-Id header (for scoping entries/accounts). */
     private Long userId;
 }
