@@ -29,4 +29,19 @@ public class EmailService {
                 "Finance App Team");
         mailSender.send(message);
     }
+
+    public void sendVerificationEmail(String to, String code) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(fromEmail);
+        message.setTo(to);
+        message.setSubject("Xác nhận tài khoản - Finance App");
+        message.setText("Chào bạn,\n\n" +
+                "Cảm ơn bạn đã đăng ký tài khoản tại Finance App.\n" +
+                "Mã xác nhận (Code) của bạn là: " + code + "\n\n" +
+                "Lưu ý: Mã này có hiệu lực trong vòng 30 phút.\n\n" +
+                "Vui lòng nhập mã này vào ứng dụng để kích hoạt tài khoản của bạn.\n\n" +
+                "Trân trọng,\n" +
+                "Finance App Team");
+        mailSender.send(message);
+    }
 }

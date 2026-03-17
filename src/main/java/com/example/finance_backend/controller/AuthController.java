@@ -58,4 +58,16 @@ public class AuthController {
         authService.resetPassword(request.getCode(), request.getNewPassword());
         return ResponseEntity.ok("Đặt lại mật khẩu thành công");
     }
+
+    @PostMapping("/verify-account")
+    public ResponseEntity<String> verifyAccount(@RequestParam String email, @RequestParam String code) {
+        authService.verifyAccount(email, code);
+        return ResponseEntity.ok("Kích hoạt tài khoản thành công. Bây giờ bạn có thể đăng nhập.");
+    }
+
+    @PostMapping("/resend-verification-code")
+    public ResponseEntity<String> resendVerificationCode(@RequestParam String email) {
+        authService.resendVerificationCode(email);
+        return ResponseEntity.ok("Mã xác minh mới đã được gửi vào email của bạn.");
+    }
 }

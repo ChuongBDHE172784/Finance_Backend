@@ -44,6 +44,7 @@ public class DataSeeder implements ApplicationRunner {
                 .email("admin@example.com")
                 .passwordHash(passwordEncoder.encode("123456"))
                 .displayName("Quản trị viên")
+                .enabled(true)
                 .build());
         Account defaultAccount = Account.builder()
                 .name("Ví chính")

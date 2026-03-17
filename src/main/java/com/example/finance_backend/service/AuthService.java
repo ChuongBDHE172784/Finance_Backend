@@ -4,8 +4,10 @@ import com.example.finance_backend.dto.*;
 import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.entity.PasswordResetToken;
 import com.example.finance_backend.entity.User;
+import com.example.finance_backend.entity.VerificationToken;
 import com.example.finance_backend.repository.PasswordResetTokenRepository;
 import com.example.finance_backend.repository.UserRepository;
+import com.example.finance_backend.repository.VerificationTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AccountService accountService;
     private final PasswordResetTokenRepository tokenRepository;
+    private final VerificationTokenRepository verificationTokenRepository;
     private final EmailService emailService;
 
     public LoginResponse login(LoginRequest req) {
@@ -38,9 +41,15 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Email hoặc mật khẩu không đúng");
         }
 
+        if (!user.isEnabled()) {
+            resendVerificationCode(user.getEmail());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tài khoản chưa được kích hoạt. Mã xác minh mới đã được gửi vào email của bạn.");
+        }
+
         return buildLoginResponse(user);
     }
 
+    @Transactional
     public LoginResponse register(RegisterRequest req) {
         String email = req.getEmail().trim().toLowerCase();
         if (userRepository.findByEmailIgnoreCase(email).isPresent()) {
@@ -50,10 +59,68 @@ public class AuthService {
                 .email(email)
                 .passwordHash(passwordEncoder.encode(req.getPassword()))
                 .displayName(req.getDisplayName() != null && !req.getDisplayName().isBlank() ? req.getDisplayName().trim() : null)
+                .enabled(false) // Mặc định là false
                 .build();
         user = userRepository.save(user);
         createDefaultAccountForUser(user.getId());
+        
+        // Gửi mã xác nhận
+        sendVerificationCode(user);
+
         return buildLoginResponse(user);
+    }
+
+    private void sendVerificationCode(User user) {
+        String code = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+        
+        // Xóa token cũ nếu có
+        verificationTokenRepository.deleteByUser(user);
+        verificationTokenRepository.flush();
+
+        VerificationToken verificationToken = VerificationToken.builder()
+                .token(code)
+                .user(user)
+                .expiryDate(Instant.now().plus(30, ChronoUnit.MINUTES))
+                .build();
+        
+        verificationTokenRepository.save(verificationToken);
+
+        try {
+            emailService.sendVerificationEmail(user.getEmail(), code);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi khi gửi email xác nhận: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void verifyAccount(String email, String code) {
+        User user = userRepository.findByEmailIgnoreCase(email.trim().toLowerCase())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy người dùng"));
+
+        VerificationToken token = verificationTokenRepository.findByToken(code)
+                .filter(t -> t.getUser().getId().equals(user.getId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác nhận không đúng"));
+
+        if (token.getExpiryDate().isBefore(Instant.now())) {
+            verificationTokenRepository.delete(token);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác nhận đã hết hạn");
+        }
+
+        user.setEnabled(true);
+        userRepository.save(user);
+        verificationTokenRepository.delete(token);
+    }
+
+    @Transactional
+    public void resendVerificationCode(String email) {
+        User user = userRepository.findByEmailIgnoreCase(email.trim().toLowerCase())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy người dùng"));
+        
+        if (user.isEnabled()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tài khoản đã được kích hoạt");
+        }
+
+        sendVerificationCode(user);
     }
 
     private void createDefaultAccountForUser(Long userId) {
