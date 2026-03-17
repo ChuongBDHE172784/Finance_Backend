@@ -131,7 +131,7 @@ public class AuthService {
         PasswordResetToken resetToken = PasswordResetToken.builder()
                 .token(code)
                 .user(user)
-                .expiryDate(Instant.now().plus(15, ChronoUnit.MINUTES))
+                .expiryDate(Instant.now().plus(30, ChronoUnit.MINUTES))
                 .build();
 
         tokenRepository.save(resetToken);
@@ -158,5 +158,22 @@ public class AuthService {
         userRepository.save(user);
 
         tokenRepository.delete(resetToken);
+    }
+
+    public LoginResponse googleLogin(GoogleLoginRequest req) {
+        String email = req.getEmail().trim().toLowerCase();
+        User user = userRepository.findByEmailIgnoreCase(email)
+                .orElseGet(() -> {
+                    User newUser = User.builder()
+                            .email(email)
+                            .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
+                            .displayName(req.getDisplayName())
+                            .build();
+                    newUser = userRepository.save(newUser);
+                    createDefaultAccountForUser(newUser.getId());
+                    return newUser;
+                });
+
+        return buildLoginResponse(user);
     }
 }

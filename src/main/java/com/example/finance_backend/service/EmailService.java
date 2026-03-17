@@ -23,6 +23,7 @@ public class EmailService {
         message.setText("Chào bạn,\n\n" +
                 "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.\n" +
                 "Mã xác nhận (Code) của bạn là: " + code + "\n\n" +
+                "Lưu ý: Mã này có hiệu lực trong vòng 30 phút.\n\n" +
                 "Nếu bạn không yêu cầu điều này, vui lòng bỏ qua email này.\n\n" +
                 "Trân trọng,\n" +
                 "Finance App Team");

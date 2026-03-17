@@ -26,6 +26,11 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 
+    @PostMapping("/google-login")
+    public ResponseEntity<LoginResponse> googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        return ResponseEntity.ok(authService.googleLogin(request));
+    }
+
     @PutMapping("/password")
     public ResponseEntity<String> updatePassword(
             @RequestHeader("X-User-Id") Long userId,
