@@ -654,27 +654,32 @@ public class AiAssistantService {
 
         return entries.stream()
                 .filter(e -> {
+                    // 1. Kiểm tra số tiền
                     if (target.amount != null && e.getAmount().compareTo(target.amount) != 0) return false;
+                    
+                    // 2. Kiểm tra danh mục (Rất quan trọng khi note trống)
+                    if (normalizedTargetCategory != null && !normalizedTargetCategory.isBlank()) {
+                        String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "").toLowerCase(VI_LOCALE);
+                        String normalizedCatName = normalizeText(catName);
+                        String normalizedTargetCat = normalizeText(normalizedTargetCategory.toLowerCase(VI_LOCALE));
+                        if (!normalizedCatName.contains(normalizedTargetCat) && !normalizedTargetCat.contains(normalizedCatName)) return false;
+                    }
+
+                    // 3. Kiểm tra từ khóa trong ghi chú
                     if (target.noteKeywords != null && !target.noteKeywords.isBlank()) {
                         String note = e.getNote() != null ? normalizeText(e.getNote().toLowerCase(VI_LOCALE)) : "";
                         String keywords = normalizeText(target.noteKeywords.toLowerCase(VI_LOCALE));
                         
-                        // Loại bỏ STOP WORDS
-                        keywords = keywords.replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật|thanh|thành|sang|thay|den|đến|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi|update|change|edit|set|delete|remove|transaction|entry|this|that|all|everything|today|yesterday|day|month|year|wallet|money|expense|income|spend|spent|buy|payment|pay|recent)\\b", "")
-                                        .replaceAll("\\s+", " ")
-                                        .trim();
-                        
-                        // LOẠI BỎ TẤT CẢ CON SỐ, DẤU CHẤM, DẤU PHẨY (vì user có thể viết 200k, 200.000 trong khi note có thể khác)
-                        keywords = keywords.replaceAll("[0-9.,dđkK]+", " ")
+                        // Loại bỏ STOP WORDS và NOISE WORDS (từ chỉ hành động, ngày tháng, đơn vị tiền) giúp tìm kiếm chính xác hơn
+                        keywords = keywords.replaceAll("\\b(sua|sửa|doi|đổi|cap nhat|cập nhật|thanh|thành|sang|thay|den|đến|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi|update|change|edit|set|delete|remove|transaction|entry|this|that|all|everything|today|yesterday|day|month|year|wallet|money|expense|income|spend|spent|buy|payment|pay|recent|nap|nap tien|gui|rut|banking|transfer)\\b", "")
+                                        .replaceAll("[0-9.,dđkK]+", " ")
                                         .replaceAll("\\s+", " ")
                                         .trim();
                                         
+                        // Nếu sau khi lọc keywords vẫn còn nội dung, thì mới so khớp với note
                         if (!keywords.isBlank() && !note.contains(keywords)) return false;
                     }
-                    if (normalizedTargetCategory != null && !normalizedTargetCategory.isBlank()) {
-                        String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "").toLowerCase(VI_LOCALE);
-                        if (!catName.contains(normalizedTargetCategory.toLowerCase(VI_LOCALE))) return false;
-                    }
+                    
                     return true;
                 })
                 .collect(Collectors.toList());
@@ -1375,25 +1380,109 @@ public class AiAssistantService {
     }
 
     private static BigDecimal extractAmount(String text) {
-        Matcher kMatch = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*k\\b", Pattern.CASE_INSENSITIVE).matcher(text);
+        if (text == null || text.isBlank()) return null;
+        String lower = text.toLowerCase(Locale.ROOT).trim();
+
+        // 1. Handle "X triệu Y" (e.g., "1 triệu 2", "1tr2")
+        Matcher trMixedMatch = Pattern.compile("(\\d+)\\s*(?:tr(?:ieu|iệu)?|t)\\s*(\\d+)?\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
+        if (trMixedMatch.find()) {
+            BigDecimal main = new BigDecimal(trMixedMatch.group(1)).multiply(new BigDecimal("1000000"));
+            String subStr = trMixedMatch.group(2);
+            if (subStr != null && !subStr.isEmpty()) {
+                BigDecimal sub = new BigDecimal(subStr);
+                // "1 triệu 2" is usually 1,200,000, not 1,000,002
+                if (sub.compareTo(new BigDecimal("1000")) < 0) {
+                     if (subStr.length() == 1) sub = sub.multiply(new BigDecimal("100000"));
+                     else if (subStr.length() == 2) sub = sub.multiply(new BigDecimal("10000"));
+                     else if (subStr.length() == 3) sub = sub.multiply(new BigDecimal("1000"));
+                }
+                return main.add(sub);
+            }
+            return main;
+        }
+
+        // 2. Handle "X trăm Y" (e.g., "2 trăm 3", "2 trăm rưỡi", "2 trăm 35")
+        // Note: In VN, "2 trăm" in expense context usually means 200,000
+        Matcher tramMatch = Pattern.compile("(\\d+)\\s*(?:tram|trăm)\\s*((\\d+)|ruoi|rưỡi)?\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
+        if (tramMatch.find()) {
+            BigDecimal main = new BigDecimal(tramMatch.group(1)).multiply(new BigDecimal("100000"));
+            String subStr = tramMatch.group(3);
+            if (tramMatch.group(2) != null && (tramMatch.group(2).contains("ruoi") || tramMatch.group(2).contains("rưỡi"))) {
+                return main.add(new BigDecimal("50000"));
+            }
+            if (subStr != null && !subStr.isEmpty()) {
+                BigDecimal sub = new BigDecimal(subStr);
+                if (sub.compareTo(new BigDecimal("100")) < 0) {
+                    if (subStr.length() == 1) sub = sub.multiply(new BigDecimal("10000"));
+                    else if (subStr.length() == 2) sub = sub.multiply(new BigDecimal("1000"));
+                }
+                return main.add(sub);
+            }
+            return main;
+        }
+
+        // 3. Handle "X tỷ Y" (e.g., "1 tỷ 2")
+        Matcher tyMixedMatch = Pattern.compile("(\\d+)\\s*(?:ty|tỷ)\\s*(\\d+)?\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
+        if (tyMixedMatch.find()) {
+            BigDecimal main = new BigDecimal(tyMixedMatch.group(1)).multiply(new BigDecimal("1000000000"));
+            String subStr = tyMixedMatch.group(2);
+            if (subStr != null && !subStr.isEmpty()) {
+                BigDecimal sub = new BigDecimal(subStr);
+                if (sub.compareTo(new BigDecimal("1000")) < 0) {
+                     if (subStr.length() == 1) sub = sub.multiply(new BigDecimal("100000000"));
+                     else if (subStr.length() == 2) sub = sub.multiply(new BigDecimal("10000000"));
+                     else if (subStr.length() == 3) sub = sub.multiply(new BigDecimal("1000000"));
+                }
+                return main.add(sub);
+            }
+            return main;
+        }
+
+        // 4. Handle "X rưỡi" (unit specific)
+        if (lower.contains(" rưỡi") || lower.contains(" ruoi")) {
+            Matcher ruoiMatch = Pattern.compile("(\\d+)\\s*(k|tr(?:ieu|iệu)?|t|ty|tỷ)?\\s*(?:ruoi|rưỡi)\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
+            if (ruoiMatch.find()) {
+                BigDecimal main = new BigDecimal(ruoiMatch.group(1));
+                String unit = ruoiMatch.group(2);
+                if (unit == null || unit.isEmpty() || unit.equalsIgnoreCase("k")) {
+                    return main.multiply(new BigDecimal("1000")).add(new BigDecimal("500"));
+                } else if (unit.matches("(?i)tr(?:ieu|iệu)?|t")) {
+                    return main.multiply(new BigDecimal("1000000")).add(new BigDecimal("500000"));
+                } else if (unit.matches("(?i)ty|tỷ")) {
+                    return main.multiply(new BigDecimal("1000000000")).add(new BigDecimal("500000000"));
+                }
+            }
+        }
+
+        // 5. Standard k/tr/ty units
+        Matcher kMatch = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*k\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
         if (kMatch.find()) {
             BigDecimal num = parseDecimal(kMatch.group(1));
             return num != null ? num.multiply(new BigDecimal("1000")) : null;
         }
-        Matcher trMatch = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*tr(?:ieu|iệu)?\\b", Pattern.CASE_INSENSITIVE)
-                .matcher(text);
+        Matcher trMatch = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*(?:tr(?:ieu|iệu)?|t)\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
         if (trMatch.find()) {
             BigDecimal num = parseDecimal(trMatch.group(1));
             return num != null ? num.multiply(new BigDecimal("1000000")) : null;
         }
-        Matcher numMatch = Pattern
-                .compile("(\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d+)?)\\s*(?:đ|d|vnd|vnđ)?", Pattern.CASE_INSENSITIVE)
-                .matcher(text);
+        Matcher tyMatch = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*(?:ty|tỷ)\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
+        if (tyMatch.find()) {
+            BigDecimal num = parseDecimal(tyMatch.group(1));
+            return num != null ? num.multiply(new BigDecimal("1000000000")) : null;
+        }
+
+        // 6. Standard number with currency suffix or no suffix
+        Matcher numMatch = Pattern.compile("(\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d+)?)\\s*(?:đ|d|vnd|vnđ)?", Pattern.CASE_INSENSITIVE).matcher(lower);
         if (numMatch.find()) {
             String raw = numMatch.group(1);
             String cleaned = raw.replaceAll("[.,]", "");
             try {
-                return new BigDecimal(cleaned);
+                BigDecimal val = new BigDecimal(cleaned);
+                // Heuristic for small numbers in common contexts
+                if (val.compareTo(new BigDecimal("1000")) < 0 && (lower.contains("ăn") || lower.contains("uống") || lower.contains("phở") || lower.contains("cơm") || lower.contains("mì") || lower.contains("mi"))) {
+                    return val.multiply(new BigDecimal("1000"));
+                }
+                return val;
             } catch (NumberFormatException e) {
                 return null;
             }
@@ -1402,9 +1491,11 @@ public class AiAssistantService {
     }
 
     private static BigDecimal parseDecimal(String raw) {
-        if (raw == null)
-            return null;
+        if (raw == null) return null;
         String normalized = raw.replace(",", ".");
+        if (normalized.chars().filter(ch -> ch == '.').count() > 1) {
+            normalized = normalized.replace(".", "");
+        }
         try {
             return new BigDecimal(normalized);
         } catch (NumberFormatException e) {
@@ -1430,11 +1521,18 @@ public class AiAssistantService {
     private static Map<String, String> categoryKeywordMap() {
         Map<String, String> map = new LinkedHashMap<>();
         map.put("an", "Ăn uống");
+        map.put("nhau", "Ăn uống");
+        map.put("tra", "Ăn uống");
+        map.put("sua", "Ăn uống");
         map.put("pho", "Ăn uống");
         map.put("com", "Ăn uống");
         map.put("bun", "Ăn uống");
-        map.put("tra sua", "Ăn uống");
+        map.put("my", "Ăn uống");
+        map.put("mi", "Ăn uống");
+        map.put("banh", "Ăn uống");
+        map.put("nuoc", "Ăn uống");
         map.put("ca phe", "Ăn uống");
+        map.put("cafe", "Ăn uống");
         map.put("uong", "Ăn uống");
         map.put("food", "Ăn uống");
         map.put("meal", "Ăn uống");
@@ -1449,6 +1547,11 @@ public class AiAssistantService {
         map.put("snack", "Ăn uống");
         map.put("xang", "Xăng xe");
         map.put("do xang", "Xăng xe");
+        map.put("dau", "Xăng xe");
+        map.put("xe", "Xăng xe");
+        map.put("o to", "Xăng xe");
+        map.put("oto", "Xăng xe");
+        map.put("xe may", "Xăng xe");
         map.put("gas", "Xăng xe");
         map.put("gasoline", "Xăng xe");
         map.put("petrol", "Xăng xe");
@@ -1461,7 +1564,15 @@ public class AiAssistantService {
         map.put("transportation", "Xăng xe");
         map.put("mua", "Mua sắm");
         map.put("sam", "Mua sắm");
+        map.put("quan ao", "Mua sắm");
+        map.put("giay", "Mua sắm");
+        map.put("tui", "Mua sắm");
+        map.put("my pham", "Mua sắm");
         map.put("sieu thi", "Mua sắm");
+        map.put("cho", "Mua sắm");
+        map.put("shopee", "Mua sắm");
+        map.put("lazada", "Mua sắm");
+        map.put("tiki", "Mua sắm");
         map.put("shopping", "Mua sắm");
         map.put("groceries", "Mua sắm");
         map.put("supermarket", "Mua sắm");
@@ -1471,7 +1582,10 @@ public class AiAssistantService {
         map.put("buy", "Mua sắm");
         map.put("giai tri", "Giải trí");
         map.put("phim", "Giải trí");
+        map.put("rap", "Giải trí");
         map.put("game", "Giải trí");
+        map.put("du lich", "Giải trí");
+        map.put("choi", "Giải trí");
         map.put("sinh nhat", "Giải trí");
         map.put("qua tang", "Giải trí");
         map.put("entertainment", "Giải trí");
@@ -1482,7 +1596,10 @@ public class AiAssistantService {
         map.put("present", "Giải trí");
         map.put("y te", "Y tế");
         map.put("thuoc", "Y tế");
+        map.put("siro", "Y tế");
+        map.put("kham", "Y tế");
         map.put("benh vien", "Y tế");
+        map.put("bac si", "Y tế");
         map.put("health", "Y tế");
         map.put("medical", "Y tế");
         map.put("hospital", "Y tế");
@@ -1490,6 +1607,8 @@ public class AiAssistantService {
         map.put("pharmacy", "Y tế");
         map.put("hoc", "Giáo dục");
         map.put("sach", "Giáo dục");
+        map.put("hoc phi", "Giáo dục");
+        map.put("khoa hoc", "Giáo dục");
         map.put("education", "Giáo dục");
         map.put("school", "Giáo dục");
         map.put("tuition", "Giáo dục");
@@ -1500,6 +1619,8 @@ public class AiAssistantService {
         map.put("nap tien", "Nạp tiền");
         map.put("thu nhap", "Nạp tiền");
         map.put("luong", "Nạp tiền");
+        map.put("tien ve", "Nạp tiền");
+        map.put("thuong", "Nạp tiền");
         map.put("income", "Nạp tiền");
         map.put("salary", "Nạp tiền");
         map.put("wage", "Nạp tiền");
@@ -1511,7 +1632,15 @@ public class AiAssistantService {
         map.put("transfer in", "Nạp tiền");
         map.put("gui xe", "Gửi xe");
         map.put("parking", "Gửi xe");
-        map.put("thuong", "Nạp tiền");
+        map.put("ve xe", "Gửi xe");
+        map.put("thue", "Nhà cửa");
+        map.put("dien", "Nhà cửa");
+        map.put("nuoc", "Nhà cửa");
+        map.put("internet", "Nhà cửa");
+        map.put("wifi", "Nhà cửa");
+        map.put("giat", "Nhà cửa");
+        map.put("thue nha", "Nhà cửa");
+        map.put("rent", "Nhà cửa");
         map.put("nap vao", "Nạp tiền");
         map.put("vao vi", "Nạp tiền");
         map.put("chuyen vao", "Nạp tiền");
