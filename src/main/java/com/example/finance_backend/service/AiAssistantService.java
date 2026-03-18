@@ -15,7 +15,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
+import com.google.genai.types.Blob;
+import com.google.genai.types.Content;
 import com.google.genai.types.GenerateContentResponse;
+import com.google.genai.types.Part;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,7 +105,7 @@ public class AiAssistantService {
         if (conversationId == null || conversationId.isBlank()) {
             conversationId = UUID.randomUUID().toString();
         }
-        if (message.isEmpty()) {
+        if (message.isEmpty() && (request.getBase64Image() == null || request.getBase64Image().isBlank())) {
             AiAssistantResponse response = AiAssistantResponse.builder()
                     .intent("UNKNOWN")
                     .reply(t(language,
@@ -117,7 +120,7 @@ public class AiAssistantService {
         AiParseResult parsed = null;
         Exception geminiError = null;
         try {
-            parsed = parseWithGemini(message, history, language);
+            parsed = parseWithGemini(message, request.getBase64Image(), history, language);
         } catch (Exception e) {
             geminiError = e;
             log.warn("Gemini parse failed for message: {}", message, e);
@@ -135,9 +138,11 @@ public class AiAssistantService {
                                 "Mình chưa kết nối được AI. Hãy kiểm tra GEMINI/GOOGLE API key ở backend và thử lại.",
                                 "I can't reach the AI right now. Please check the GEMINI/GOOGLE API key on the backend and try again."))
                         .build();
-                return finalizeResponse(response, conversationId, message);
+                return finalizeResponse(response, conversationId, message, request.getBase64Image());
             }
         }
+        
+        // ... (intent logic continues) ...
 
         if (parsed == null || parsed.intent == null) {
             AiAssistantResponse response = AiAssistantResponse.builder()
@@ -146,29 +151,32 @@ public class AiAssistantService {
                             "Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng này tôi tiêu nhiều nhất vào cái gì?\" hoặc \"Hôm nay tôi ăn phở 45k\".",
                             "I didn't quite understand. Try: \"What did I spend the most on this month?\" or \"I had pho for 45k today\"."))
                     .build();
-            return finalizeResponse(response, conversationId, message);
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
 
         final String intent = parsed.intent.trim().toUpperCase(Locale.ROOT);
         if ("INSERT".equals(intent)) {
             AiAssistantResponse response = handleInsert(message, parsed, request.getAccountId(), request.getUserId(), language);
-            return finalizeResponse(response, conversationId, message);
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
         if ("QUERY".equals(intent)) {
             AiAssistantResponse response = handleQuery(parsed, language);
-            return finalizeResponse(response, conversationId, message);
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
         if ("UPDATE".equals(intent)) {
             AiAssistantResponse response = handleUpdate(parsed, message, request.getAccountId(), language);
-            return finalizeResponse(response, conversationId, message);
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
         if ("DELETE".equals(intent)) {
             AiAssistantResponse response = handleDelete(parsed, message, language);
-            return finalizeResponse(response, conversationId, message);
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
         if ("ADVICE".equals(intent)) {
-            AiAssistantResponse response = handleAdvice(parsed, language);
-            return finalizeResponse(response, conversationId, message);
+            AiAssistantResponse response = AiAssistantResponse.builder()
+                    .intent("ADVICE")
+                    .reply(parsed.adviceReply)
+                    .build();
+            return finalizeResponse(response, conversationId, message, request.getBase64Image());
         }
 
         AiAssistantResponse response = AiAssistantResponse.builder()
@@ -177,12 +185,42 @@ public class AiAssistantService {
                         "Mình chưa hiểu rõ ý bạn. Hãy thử: \"Tháng trước tôi tiêu bao nhiêu\", \"Hôm nay tôi ăn phở 45k\" hoặc \"Xóa giao dịch 45k vừa rồi\".",
                         "I didn't quite understand. Try: \"How much did I spend last month\", \"I had pho for 45k today\", or \"Delete the 45k transaction\"."))
                 .build();
-        return finalizeResponse(response, conversationId, message);
+        return finalizeResponse(response, conversationId, message, request.getBase64Image());
     }
 
-    private AiParseResult parseWithGemini(String message, List<AiMessage> history, String language) throws JsonProcessingException {
+    private AiParseResult parseWithGemini(String message, String base64Image, List<AiMessage> history, String language) throws JsonProcessingException {
         String prompt = buildPrompt(message, history, language);
-        GenerateContentResponse response = getClient().models.generateContent(model, prompt, null);
+        GenerateContentResponse response;
+        
+        if (base64Image != null && !base64Image.isBlank()) {
+            // Multimodal request
+            String data = base64Image;
+            String mimeType = "image/jpeg"; // Default
+            if (data.contains("base64,")) {
+                String[] parts = data.split("base64,");
+                data = parts[1];
+                if (parts[0].contains(":")) {
+                    mimeType = parts[0].substring(parts[0].indexOf(":") + 1, parts[0].indexOf(";"));
+                }
+            }
+            
+            Part textPart = Part.builder().text(prompt).build();
+            Part imagePart = Part.builder()
+                    .inlineData(Blob.builder()
+                            .data(java.util.Base64.getDecoder().decode(data))
+                            .mimeType(mimeType)
+                            .build())
+                    .build();
+            
+            Content content = Content.builder()
+                    .parts(List.of(textPart, imagePart))
+                    .build();
+            
+            response = getClient().models.generateContent(model, List.of(content), null);
+        } else {
+            response = getClient().models.generateContent(model, prompt, null);
+        }
+        
         String text = response.text();
         if (text == null) {
             return null;
@@ -628,17 +666,6 @@ public class AiAssistantService {
                 .build();
     }
 
-    private AiAssistantResponse handleAdvice(AiParseResult parsed, String language) {
-        String reply = parsed.adviceReply != null
-                ? parsed.adviceReply
-                : t(language,
-                    "Mình có thể giúp gì cho bạn về quản lý tài chính?",
-                    "How can I help you with personal finance?");
-        return AiAssistantResponse.builder()
-                .intent("ADVICE")
-                .reply(reply)
-                .build();
-    }
 
     private List<com.example.finance_backend.entity.FinancialEntry> findTargetEntries(AiParsedTarget target) {
         if (target == null) return List.of();
@@ -781,6 +808,7 @@ public class AiAssistantService {
     }
 
     private String buildPrompt(String message, List<AiMessage> history, String language) {
+        String safeMessage = message == null ? "" : message.trim();
         LocalDate today = LocalDate.now();
         List<String> categories = categoryService.findAll().stream()
                 .map(c -> c.getName())
@@ -804,6 +832,10 @@ public class AiAssistantService {
                     - For UPDATE/DELETE, use "target" to identify the transaction (amount, date, old category). Use "entries[0]" for new values (if UPDATE).
                     - If the user wants to delete all transactions in a time range/condition, set "target.deleteAll = true".
                     - If the user uses English category names, map them to the closest category from the list above and output that category name exactly.
+                    - If a receipt/invoice image is provided, perform OCR and summarize all findings (date, items, total). Ask the user if they want to add these transactions. Set intent to ADVICE and provide the summary in "adviceReply".
+                    - If the user asks to CORRECT or CHANGE any detail of the receipt they just sent (before saving), do NOT use intent UPDATE. Instead, update your summary and ask if it's correct now. Stay in intent ADVICE.
+                    - ONLY use intent UPDATE when the user wants to change a transaction that was ALREADY saved to the database in the past.
+                    - Do NOT use intent INSERT directly from an image unless the user specifically says "Add this" or "Save this".
 
                     SCHEMA:
                     {
@@ -851,7 +883,7 @@ public class AiAssistantService {
 
                     INPUT:
                     %s
-                    """.formatted(today.format(DATE_FMT), categoriesStr, historyBlock, message);
+                    """.formatted(today.format(DATE_FMT), categoriesStr, historyBlock, safeMessage);
         }
 
         return """
@@ -868,6 +900,10 @@ public class AiAssistantService {
                 - Nếu là ADVICE, hãy điền câu trả lời vào trường "adviceReply".
                 - Khi UPDATE/DELETE, dùng "target" để xác định giao dịch cần tác động (số tiền, ngày, danh mục cũ). Dùng "entries[0]" để chứa thông tin mới (nếu là UPDATE).
                 - Nếu muốn xóa tất cả giao dịch trong một khoảng thời gian/điều kiện, đặt "target.deleteAll = true".
+                - Nếu người dùng gửi ảnh hóa đơn/biên lai, hãy thực hiện OCR và tóm tắt lại các thông tin tìm thấy (ngày, các món đồ, tổng tiền). Hỏi người dùng xem họ có muốn thêm các giao dịch này không. Đặt intent thành ADVICE và để nội dung tóm tắt vào "adviceReply".
+                - Nếu người dùng yêu cầu SỬA hoặc THAY ĐỔI thông tin của hóa đơn vừa gửi (khi chưa lưu), KHÔNG được dùng intent UPDATE. Hãy cập nhật lại bản tóm tắt của bạn và hỏi lại xem đã đúng chưa. Tiếp tục giữ intent là ADVICE.
+                - CHỈ dùng intent UPDATE khi người dùng muốn sửa một giao dịch ĐÃ ĐƯỢC LƯU vào cơ sở dữ liệu từ trước.
+                - KHÔNG đặt intent thành INSERT trực tiếp từ ảnh trừ khi người dùng nói "Thêm cái này" hoặc "Lưu lại".
 
                 SCHEMA:
                 {
@@ -915,7 +951,7 @@ public class AiAssistantService {
 
                 ĐẦU VÀO:
                 %s
-                """.formatted(today.format(DATE_FMT), categoriesStr, historyBlock, message);
+                """.formatted(today.format(DATE_FMT), categoriesStr, historyBlock, safeMessage);
     }
 
     private Client getClient() {
@@ -1044,10 +1080,12 @@ public class AiAssistantService {
         return bestMatchId;
     }
 
-    private AiAssistantResponse finalizeResponse(AiAssistantResponse response, String conversationId, String message) {
+    private AiAssistantResponse finalizeResponse(AiAssistantResponse response, String conversationId, String message, String base64Image) {
         response.setConversationId(conversationId);
-        if (message != null && !message.isBlank()) {
-            saveMessage(conversationId, "USER", message);
+        boolean hasImage = base64Image != null && !base64Image.isBlank();
+        if ((message != null && !message.isBlank()) || hasImage) {
+            String safeContent = (message == null || message.isBlank()) ? "[Gửi ảnh hóa đơn]" : message.trim();
+            saveMessage(conversationId, "USER", safeContent);
             if (response.getReply() != null) {
                 saveMessage(conversationId, "ASSISTANT", response.getReply());
             }

@@ -1,6 +1,5 @@
 package com.example.finance_backend.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
 @Getter
@@ -10,7 +9,6 @@ import lombok.*;
 @Builder
 public class AiAssistantRequest {
 
-    @NotBlank
     private String message;
 
     private String conversationId;
@@ -22,4 +20,7 @@ public class AiAssistantRequest {
 
     /** User ID from X-User-Id header (for scoping entries/accounts). */
     private Long userId;
+
+    /** Base64 encoded image for OCR/Visual analysis. */
+    private String base64Image;
 }
