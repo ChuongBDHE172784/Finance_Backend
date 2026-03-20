@@ -237,14 +237,25 @@ public class AuthService {
         tokenRepository.delete(resetToken);
     }
 
+    @Transactional
     public LoginResponse googleLogin(GoogleLoginRequest req) {
         String email = req.getEmail().trim().toLowerCase();
         User user = userRepository.findByEmailIgnoreCase(email)
+                .map(existingUser -> {
+                    // Cập nhật displayName nếu cần (theo thông tin mới nhất từ Google)
+                    if (req.getDisplayName() != null && !req.getDisplayName().isBlank()) {
+                        existingUser.setDisplayName(req.getDisplayName());
+                    }
+                    // Đảm bảo user này đã được kích hoạt vì đã verify qua Google
+                    existingUser.setEnabled(true);
+                    return userRepository.save(existingUser);
+                })
                 .orElseGet(() -> {
                     User newUser = User.builder()
                             .email(email)
                             .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
                             .displayName(req.getDisplayName())
+                            .enabled(true)
                             .build();
                     newUser = userRepository.save(newUser);
                     createDefaultAccountForUser(newUser.getId());
