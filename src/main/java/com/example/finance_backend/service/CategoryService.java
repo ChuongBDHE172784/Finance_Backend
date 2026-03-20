@@ -57,6 +57,7 @@ public class CategoryService {
         }
         Category c = Category.builder()
                 .name(req.getName().trim())
+                .type(req.getType())
                 .iconName(req.getIconName() != null ? req.getIconName().trim() : null)
                 .colorHex(req.getColorHex() != null ? req.getColorHex().trim() : null)
                 .sortOrder(sortOrder)
@@ -71,6 +72,7 @@ public class CategoryService {
         Category c = categoryRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Category not found"));
         c.setName(req.getName().trim());
+        c.setType(req.getType());
         c.setIconName(req.getIconName() != null ? req.getIconName().trim() : null);
         c.setColorHex(req.getColorHex() != null ? req.getColorHex().trim() : null);
         if (req.getSortOrder() != null) {

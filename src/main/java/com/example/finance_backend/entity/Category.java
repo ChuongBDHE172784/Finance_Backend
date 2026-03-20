@@ -19,6 +19,10 @@ public class Category {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private EntryType type;
+
     @Column(name = "icon_name", length = 50)
     private String iconName;
 

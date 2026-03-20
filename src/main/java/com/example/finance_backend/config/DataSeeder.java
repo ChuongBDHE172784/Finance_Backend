@@ -27,15 +27,20 @@ public class DataSeeder implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         ensureDefaultUser();
-        ensureCategory("Ăn uống", "restaurant", "FF9800", 1);
-        ensureCategory("Xăng xe", "local_gas_station", "2196F3", 2);
-        ensureCategory("Mua sắm", "shopping_bag", "9C27B0", 3);
-        ensureCategory("Giải trí", "confirmation_number", "E91E63", 4);
-        ensureCategory("Y tế", "medical_services", "F44336", 5);
-        ensureCategory("Giáo dục", "school", "3F51B5", 6);
-        ensureCategory("Gửi xe", "local_parking", "795548", 7);
-        ensureCategory("Nạp tiền", "account_balance_wallet", "4CAF50", 8, List.of("Nạp ví"));
-        ensureCategory("Khác", "category", "009688", 99);
+        // Chi tiêu (Expense)
+        ensureCategory("Ăn uống", "restaurant", "FF9800", 1, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Xăng xe", "local_gas_station", "2196F3", 2, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Mua sắm", "shopping_bag", "9C27B0", 3, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Giải trí", "confirmation_number", "E91E63", 4, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Y tế", "medical_services", "F44336", 5, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Giáo dục", "school", "3F51B5", 6, com.example.finance_backend.entity.EntryType.EXPENSE);
+        ensureCategory("Gửi xe", "local_parking", "795548", 7, com.example.finance_backend.entity.EntryType.EXPENSE);
+        
+        // Thu nhập (Income)
+        ensureCategory("Lương", "payments", "4CAF50", 10, com.example.finance_backend.entity.EntryType.INCOME);
+        ensureCategory("Nạp tiền", "account_balance_wallet", "4CAF50", 11, com.example.finance_backend.entity.EntryType.INCOME, List.of("Nạp ví"));
+        
+        ensureCategory("Khác", "category", "009688", 99, com.example.finance_backend.entity.EntryType.EXPENSE);
     }
 
     private void ensureDefaultUser() {
@@ -53,19 +58,27 @@ public class DataSeeder implements ApplicationRunner {
         accountService.create(defaultAccount, admin.getId());
     }
 
-    private void ensureCategory(String name, String icon, String color, int order) {
-        ensureCategory(name, icon, color, order, List.of());
+    private void ensureCategory(String name, String icon, String color, int order, com.example.finance_backend.entity.EntryType type) {
+        ensureCategory(name, icon, color, order, type, List.of());
     }
 
-    private void ensureCategory(String name, String icon, String color, int order, List<String> aliases) {
+    private void ensureCategory(String name, String icon, String color, int order, com.example.finance_backend.entity.EntryType type, List<String> aliases) {
         Optional<Category> existing = categoryRepository.findByName(name);
-        if (existing.isPresent()) return;
+        if (existing.isPresent()) {
+            Category c = existing.get();
+            if (c.getType() == null) {
+                c.setType(type);
+                categoryRepository.save(c);
+            }
+            return;
+        }
 
         for (String alias : aliases) {
             Optional<Category> aliasCategory = categoryRepository.findByName(alias);
             if (aliasCategory.isPresent()) {
                 Category c = aliasCategory.get();
                 c.setName(name);
+                c.setType(type);
                 categoryRepository.save(c);
                 return;
             }
@@ -73,6 +86,7 @@ public class DataSeeder implements ApplicationRunner {
 
         categoryRepository.save(Category.builder()
                 .name(name)
+                .type(type)
                 .iconName(icon)
                 .colorHex(color)
                 .sortOrder(order)
