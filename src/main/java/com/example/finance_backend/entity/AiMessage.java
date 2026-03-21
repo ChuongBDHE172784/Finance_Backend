@@ -20,6 +20,9 @@ public class AiMessage {
 
     @Column(name = "conversation_id", nullable = false, length = 64)
     private String conversationId;
+    
+    @Column(name = "user_id")
+    private Long userId;
 
     @Column(nullable = false, length = 20)
     private String role; // USER | ASSISTANT

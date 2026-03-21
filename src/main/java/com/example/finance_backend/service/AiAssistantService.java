@@ -145,7 +145,7 @@ public class AiAssistantService {
                 break;
         }
 
-        return finalizeResponse(response, conversationId, message, request.getBase64Image());
+        return finalizeResponse(response, conversationId, message, request.getBase64Image(), request.getUserId());
     }
 
     // ═════════════════════════════════════════════════════════
@@ -860,24 +860,36 @@ public class AiAssistantService {
     }
 
     private AiAssistantResponse finalizeResponse(AiAssistantResponse response, String conversationId,
-                                                  String message, String base64Image) {
+                                                  String message, String base64Image, Long userId) {
         response.setConversationId(conversationId);
         boolean hasImage = base64Image != null && !base64Image.isBlank();
         if ((message != null && !message.isBlank()) || hasImage) {
             String safeContent = (message == null || message.isBlank()) ? "[Gửi ảnh hóa đơn]" : message.trim();
-            saveMessage(conversationId, "USER", safeContent);
+            saveMessage(conversationId, "USER", safeContent, userId);
             if (response.getReply() != null) {
-                saveMessage(conversationId, "ASSISTANT", response.getReply());
+                saveMessage(conversationId, "ASSISTANT", response.getReply(), userId);
             }
         }
         return response;
     }
 
-    private void saveMessage(String conversationId, String role, String content) {
+    public List<AiMessage> getHistory(Long userId) {
+        if (userId == null) return List.of();
+        // Load only the latest 50 messages to avoid large payloads
+        List<AiMessage> all = aiMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
+        if (all.size() > 50) return all.subList(all.size() - 50, all.size());
+        return all;
+    }
+
+    private void saveMessage(String conversationId, String role, String content, Long userId) {
         String safe = content == null ? "" : content.trim();
         if (safe.length() > 4000) safe = safe.substring(0, 3997) + "...";
         aiMessageRepository.save(AiMessage.builder()
-                .conversationId(conversationId).role(role).content(safe).build());
+                .conversationId(conversationId)
+                .userId(userId)
+                .role(role)
+                .content(safe)
+                .build());
     }
 
     // ═════════════════════════════════════════════════════════
