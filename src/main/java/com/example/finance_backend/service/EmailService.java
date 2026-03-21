@@ -1,47 +1,68 @@
 package com.example.finance_backend.service;
 
-import lombok.RequiredArgsConstructor;
+import com.sendgrid.Method;
+import com.sendgrid.Request;
+import com.sendgrid.Response;
+import com.sendgrid.SendGrid;
+import com.sendgrid.helpers.mail.Mail;
+import com.sendgrid.helpers.mail.objects.Content;
+import com.sendgrid.helpers.mail.objects.Email;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+
 @Service
-@RequiredArgsConstructor
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    @Value("${app.sendgrid.api-key}")
+    private String sendGridApiKey;
 
     @Value("${app.from-email}")
     private String fromEmail;
 
     public void sendResetPasswordEmail(String to, String code) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(fromEmail);
-        message.setTo(to);
-        message.setSubject("Yêu cầu đặt lại mật khẩu - Finance App");
-        message.setText("Chào bạn,\n\n" +
+        String subject = "Yêu cầu đặt lại mật khẩu - Finance App";
+        String body = "Chào bạn,\n\n" +
                 "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.\n" +
                 "Mã xác nhận (Code) của bạn là: " + code + "\n\n" +
                 "Lưu ý: Mã này có hiệu lực trong vòng 30 phút.\n\n" +
                 "Nếu bạn không yêu cầu điều này, vui lòng bỏ qua email này.\n\n" +
                 "Trân trọng,\n" +
-                "Finance App Team");
-        mailSender.send(message);
+                "Finance App Team";
+        sendEmailViaSendGrid(to, subject, body);
     }
 
     public void sendVerificationEmail(String to, String code) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(fromEmail);
-        message.setTo(to);
-        message.setSubject("Xác nhận tài khoản - Finance App");
-        message.setText("Chào bạn,\n\n" +
+        String subject = "Xác nhận tài khoản - Finance App";
+        String body = "Chào bạn,\n\n" +
                 "Cảm ơn bạn đã đăng ký tài khoản tại Finance App.\n" +
                 "Mã xác nhận (Code) của bạn là: " + code + "\n\n" +
                 "Lưu ý: Mã này có hiệu lực trong vòng 30 phút.\n\n" +
                 "Vui lòng nhập mã này vào ứng dụng để kích hoạt tài khoản của bạn.\n\n" +
                 "Trân trọng,\n" +
-                "Finance App Team");
-        mailSender.send(message);
+                "Finance App Team";
+        sendEmailViaSendGrid(to, subject, body);
+    }
+
+    private void sendEmailViaSendGrid(String toEmail, String subject, String bodyContent) {
+        Email from = new Email(fromEmail);
+        Email to = new Email(toEmail);
+        Content content = new Content("text/plain", bodyContent);
+        Mail mail = new Mail(from, subject, to, content);
+
+        SendGrid sg = new SendGrid(sendGridApiKey);
+        Request request = new Request();
+        try {
+            request.setMethod(Method.POST);
+            request.setEndpoint("mail/send");
+            request.setBody(mail.build());
+            Response response = sg.api(request);
+            System.out.println("SendGrid Status: " + response.getStatusCode());
+            System.out.println("SendGrid Body: " + response.getBody());
+        } catch (IOException ex) {
+            System.err.println("Lỗi gửi mail: " + ex.getMessage());
+            throw new RuntimeException("Lỗi khi gửi email xác nhận: " + ex.getMessage(), ex);
+        }
     }
 }
