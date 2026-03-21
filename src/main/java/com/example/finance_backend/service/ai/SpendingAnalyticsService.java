@@ -1,7 +1,9 @@
 package com.example.finance_backend.service.ai;
 
+import com.example.finance_backend.entity.Budget;
 import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.entity.FinancialEntry;
+import com.example.finance_backend.repository.BudgetRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.CategoryService;
 import lombok.*;
@@ -9,36 +11,37 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Spending analytics engine using SQL aggregation.
+ * Spending analytics engine.
  * Provides: totals, daily averages, top categories, percentage breakdowns,
- * spending trends, and recent transaction lists.
+ * spending trends, budget tracking, overspending alerts, monthly summaries,
+ * financial health, weekly patterns, and smart suggestions.
  */
 @Service
 public class SpendingAnalyticsService {
 
     private final FinancialEntryRepository entryRepository;
     private final CategoryService categoryService;
+    private final BudgetRepository budgetRepository;
 
     public SpendingAnalyticsService(FinancialEntryRepository entryRepository,
-                                     CategoryService categoryService) {
+                                     CategoryService categoryService,
+                                     BudgetRepository budgetRepository) {
         this.entryRepository = entryRepository;
         this.categoryService = categoryService;
+        this.budgetRepository = budgetRepository;
     }
 
     // ═════════════════════════════════════════════════════════
-    // TOTAL SPENDING
+    // TOTAL SPENDING (userId-scoped)
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Get total spending/income for a date range.
-     * Uses SQL SUM aggregation instead of loading all entries.
-     */
     public BigDecimal getTotalSpending(LocalDate startDate, LocalDate endDate, String typeFilter) {
         List<FinancialEntry> entries = getFilteredEntries(startDate, endDate, typeFilter);
         return entries.stream()
@@ -46,13 +49,15 @@ public class SpendingAnalyticsService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    public BigDecimal getTotalSpendingForUser(Long userId, LocalDate start, LocalDate end, EntryType type) {
+        if (userId == null) return getTotalSpending(start, end, type.name());
+        return entryRepository.sumByUserIdAndTypeAndDateRange(userId, type, start, end);
+    }
+
     // ═════════════════════════════════════════════════════════
     // DAILY AVERAGE
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Get average daily spending over a date range.
-     */
     public DailyAverageResult getDailyAverage(LocalDate startDate, LocalDate endDate, String typeFilter) {
         BigDecimal total = getTotalSpending(startDate, endDate, typeFilter);
         long days = Math.max(1, ChronoUnit.DAYS.between(startDate, endDate) + 1);
@@ -64,9 +69,6 @@ public class SpendingAnalyticsService {
     // TOP CATEGORIES
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Get spending grouped by category, sorted by amount descending.
-     */
     public List<CategoryTotal> getTopCategories(LocalDate startDate, LocalDate endDate,
                                                  String typeFilter, int limit) {
         List<FinancialEntry> entries = getFilteredEntries(startDate, endDate, typeFilter);
@@ -90,9 +92,6 @@ public class SpendingAnalyticsService {
     // PERCENTAGE BREAKDOWN
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Get spending percentage breakdown by category.
-     */
     public PercentageBreakdownResult getSpendingByCategory(LocalDate startDate, LocalDate endDate,
                                                             String typeFilter) {
         List<FinancialEntry> entries = getFilteredEntries(startDate, endDate, typeFilter);
@@ -129,9 +128,6 @@ public class SpendingAnalyticsService {
     // SPENDING TREND (period-over-period)
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Compare spending between current period and previous period.
-     */
     public TrendResult getSpendingTrend(LocalDate currentStart, LocalDate currentEnd,
                                          String typeFilter) {
         long days = ChronoUnit.DAYS.between(currentStart, currentEnd) + 1;
@@ -168,13 +164,263 @@ public class SpendingAnalyticsService {
     // RECENT TRANSACTIONS LIST
     // ═════════════════════════════════════════════════════════
 
-    /**
-     * Get recent transactions in a date range.
-     */
     public List<FinancialEntry> getRecentTransactions(LocalDate startDate, LocalDate endDate,
                                                        String typeFilter, int limit) {
         List<FinancialEntry> entries = getFilteredEntries(startDate, endDate, typeFilter);
         return entries.stream().limit(limit).collect(Collectors.toList());
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // BUDGET TRACKING
+    // ═════════════════════════════════════════════════════════
+
+    /**
+     * Get budget status for a specific category or all budgets.
+     */
+    public BudgetStatusResult getBudgetStatus(Long userId, Long categoryId,
+                                               LocalDate start, LocalDate end) {
+        Optional<Budget> budgetOpt = budgetRepository
+                .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                        userId, categoryId, end, start);
+        if (budgetOpt.isEmpty()) return null;
+
+        Budget budget = budgetOpt.get();
+        // Scope to this category
+        List<FinancialEntry> entries = entryRepository
+                .findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end);
+        BigDecimal categorySpent = entries.stream()
+                .filter(e -> e.getType() == EntryType.EXPENSE && Objects.equals(e.getCategoryId(), categoryId))
+                .map(FinancialEntry::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal percentUsed = budget.getAmount().compareTo(BigDecimal.ZERO) > 0
+                ? categorySpent.multiply(new BigDecimal("100")).divide(budget.getAmount(), 1, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        boolean isOver = categorySpent.compareTo(budget.getAmount()) > 0;
+        BigDecimal overAmount = isOver ? categorySpent.subtract(budget.getAmount()) : BigDecimal.ZERO;
+
+        String categoryName = categoryService.getIdToNameMap().getOrDefault(categoryId, "Khác");
+        return new BudgetStatusResult(categoryName, budget.getAmount(), categorySpent,
+                percentUsed, isOver, overAmount);
+    }
+
+    /**
+     * Get all active budget statuses for a user.
+     */
+    public List<BudgetStatusResult> getAllBudgetStatuses(Long userId, LocalDate date) {
+        List<Budget> budgets = budgetRepository
+                .findByUserIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(userId, date, date);
+        if (budgets.isEmpty()) return List.of();
+
+        List<BudgetStatusResult> results = new ArrayList<>();
+        for (Budget b : budgets) {
+            BudgetStatusResult status = getBudgetStatus(userId, b.getCategoryId(),
+                    b.getStartDate(), b.getEndDate());
+            if (status != null) results.add(status);
+        }
+        return results;
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // OVERSPENDING ALERTS
+    // ═════════════════════════════════════════════════════════
+
+    /**
+     * Detect categories with unusual spending vs historical average.
+     */
+    public List<OverspendingAlert> getOverspendingAlerts(Long userId, LocalDate currentStart, LocalDate currentEnd) {
+        long days = ChronoUnit.DAYS.between(currentStart, currentEnd) + 1;
+        LocalDate prevStart = currentStart.minusDays(days);
+        LocalDate prevEnd = currentStart.minusDays(1);
+
+        List<FinancialEntry> currentEntries = userId != null
+                ? entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, currentStart, currentEnd)
+                : entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(currentStart, currentEnd);
+        List<FinancialEntry> prevEntries = userId != null
+                ? entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, prevStart, prevEnd)
+                : entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(prevStart, prevEnd);
+
+        Map<Long, BigDecimal> currentByCat = groupByCategory(currentEntries.stream()
+                .filter(e -> e.getType() == EntryType.EXPENSE).collect(Collectors.toList()));
+        Map<Long, BigDecimal> prevByCat = groupByCategory(prevEntries.stream()
+                .filter(e -> e.getType() == EntryType.EXPENSE).collect(Collectors.toList()));
+
+        Map<Long, String> idToName = categoryService.getIdToNameMap();
+        List<OverspendingAlert> alerts = new ArrayList<>();
+
+        for (var entry : currentByCat.entrySet()) {
+            BigDecimal prevAmount = prevByCat.getOrDefault(entry.getKey(), BigDecimal.ZERO);
+            if (prevAmount.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal diff = entry.getValue().subtract(prevAmount);
+                BigDecimal pctChange = diff.multiply(new BigDecimal("100"))
+                        .divide(prevAmount, 1, RoundingMode.HALF_UP);
+                if (pctChange.compareTo(new BigDecimal("30")) > 0) { // >30% increase
+                    alerts.add(new OverspendingAlert(
+                            idToName.getOrDefault(entry.getKey(), "Khác"),
+                            entry.getValue(), prevAmount, pctChange));
+                }
+            }
+        }
+        alerts.sort((a, b) -> b.getPercentIncrease().compareTo(a.getPercentIncrease()));
+        return alerts;
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // MONTHLY SUMMARY
+    // ═════════════════════════════════════════════════════════
+
+    public MonthlySummaryResult getMonthlySummary(Long userId, int month, int year) {
+        LocalDate start = LocalDate.of(year, month, 1);
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+        LocalDate prevStart = start.minusMonths(1);
+        LocalDate prevEnd = prevStart.withDayOfMonth(prevStart.lengthOfMonth());
+
+        BigDecimal totalExpense = getTotalSpendingForUser(userId, start, end, EntryType.EXPENSE);
+        BigDecimal totalIncome = getTotalSpendingForUser(userId, start, end, EntryType.INCOME);
+        BigDecimal prevExpense = getTotalSpendingForUser(userId, prevStart, prevEnd, EntryType.EXPENSE);
+
+        // Category breakdown
+        List<FinancialEntry> entries = userId != null
+                ? entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
+                : entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
+        Map<Long, BigDecimal> catTotals = groupByCategory(entries.stream()
+                .filter(e -> e.getType() == EntryType.EXPENSE).collect(Collectors.toList()));
+
+        Map<Long, String> idToName = categoryService.getIdToNameMap();
+        List<CategoryPercentage> breakdowns = new ArrayList<>();
+        if (totalExpense.compareTo(BigDecimal.ZERO) > 0) {
+            breakdowns = catTotals.entrySet().stream()
+                    .sorted(Map.Entry.<Long, BigDecimal>comparingByValue().reversed())
+                    .map(entry -> {
+                        BigDecimal pct = entry.getValue().multiply(new BigDecimal("100"))
+                                .divide(totalExpense, 1, RoundingMode.HALF_UP);
+                        return new CategoryPercentage(
+                                idToName.getOrDefault(entry.getKey(), "Khác"),
+                                entry.getValue(), pct);
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        // Trend vs previous month
+        BigDecimal trendPct = BigDecimal.ZERO;
+        String trendDir = "STABLE";
+        if (prevExpense.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal diff = totalExpense.subtract(prevExpense);
+            trendPct = diff.multiply(new BigDecimal("100"))
+                    .divide(prevExpense, 1, RoundingMode.HALF_UP);
+            trendDir = diff.compareTo(BigDecimal.ZERO) > 0 ? "UP"
+                    : diff.compareTo(BigDecimal.ZERO) < 0 ? "DOWN" : "STABLE";
+        }
+
+        return new MonthlySummaryResult(totalExpense, totalIncome, breakdowns, trendDir, trendPct);
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // FINANCIAL HEALTH
+    // ═════════════════════════════════════════════════════════
+
+    public FinancialHealthResult getFinancialHealth(Long userId, int month, int year) {
+        LocalDate start = LocalDate.of(year, month, 1);
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+
+        BigDecimal totalIncome = getTotalSpendingForUser(userId, start, end, EntryType.INCOME);
+        BigDecimal totalExpense = getTotalSpendingForUser(userId, start, end, EntryType.EXPENSE);
+
+        BigDecimal savingsRate = BigDecimal.ZERO;
+        BigDecimal ratio = BigDecimal.ZERO;
+        if (totalIncome.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal savings = totalIncome.subtract(totalExpense);
+            savingsRate = savings.multiply(new BigDecimal("100"))
+                    .divide(totalIncome, 1, RoundingMode.HALF_UP);
+            ratio = totalExpense.multiply(new BigDecimal("100"))
+                    .divide(totalIncome, 1, RoundingMode.HALF_UP);
+        }
+
+        return new FinancialHealthResult(totalIncome, totalExpense, savingsRate, ratio);
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // WEEKLY PATTERNS
+    // ═════════════════════════════════════════════════════════
+
+    public WeeklyPatternResult getWeeklyPatterns(Long userId, LocalDate start, LocalDate end) {
+        List<FinancialEntry> entries = userId != null
+                ? entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
+                : entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
+
+        List<FinancialEntry> expenses = entries.stream()
+                .filter(e -> e.getType() == EntryType.EXPENSE)
+                .collect(Collectors.toList());
+
+        BigDecimal weekdayTotal = BigDecimal.ZERO;
+        BigDecimal weekendTotal = BigDecimal.ZERO;
+        int weekdayCount = 0, weekendCount = 0;
+        Map<DayOfWeek, BigDecimal> dayTotals = new EnumMap<>(DayOfWeek.class);
+
+        for (FinancialEntry e : expenses) {
+            DayOfWeek dow = e.getTransactionDate().getDayOfWeek();
+            dayTotals.merge(dow, e.getAmount(), BigDecimal::add);
+            if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+                weekendTotal = weekendTotal.add(e.getAmount());
+                weekendCount++;
+            } else {
+                weekdayTotal = weekdayTotal.add(e.getAmount());
+                weekdayCount++;
+            }
+        }
+
+        BigDecimal weekdayAvg = weekdayCount > 0
+                ? weekdayTotal.divide(new BigDecimal(weekdayCount), 0, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        BigDecimal weekendAvg = weekendCount > 0
+                ? weekendTotal.divide(new BigDecimal(weekendCount), 0, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+
+        DayOfWeek peakDay = dayTotals.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(DayOfWeek.MONDAY);
+
+        return new WeeklyPatternResult(weekdayAvg, weekendAvg, peakDay,
+                weekendAvg.compareTo(weekdayAvg) > 0);
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // SMART SUGGESTIONS
+    // ═════════════════════════════════════════════════════════
+
+    public List<SmartSuggestionResult> getSmartSuggestions(Long userId) {
+        LocalDate now = LocalDate.now();
+        LocalDate start = now.withDayOfMonth(1);
+        LocalDate end = now;
+
+        List<CategoryTotal> topCats = getTopCategoriesForUser(userId, start, end, 3);
+        List<SmartSuggestionResult> suggestions = new ArrayList<>();
+
+        for (CategoryTotal cat : topCats) {
+            BigDecimal potentialSavings = cat.getTotal()
+                    .multiply(new BigDecimal("0.15"))
+                    .setScale(0, RoundingMode.HALF_UP);
+            if (potentialSavings.compareTo(new BigDecimal("10000")) > 0) {
+                suggestions.add(new SmartSuggestionResult(cat.getCategoryName(), potentialSavings));
+            }
+        }
+        return suggestions;
+    }
+
+    private List<CategoryTotal> getTopCategoriesForUser(Long userId, LocalDate start, LocalDate end, int limit) {
+        if (userId != null) {
+            List<Object[]> rows = entryRepository.sumByCategoryForUser(userId, EntryType.EXPENSE, start, end);
+            Map<Long, String> idToName = categoryService.getIdToNameMap();
+            return rows.stream()
+                    .limit(limit)
+                    .map(row -> new CategoryTotal(
+                            (Long) row[0],
+                            idToName.getOrDefault((Long) row[0], "Khác"),
+                            (BigDecimal) row[1]))
+                    .collect(Collectors.toList());
+        }
+        return getTopCategories(start, end, "EXPENSE", limit);
     }
 
     // ═════════════════════════════════════════════════════════
@@ -196,6 +442,14 @@ public class SpendingAnalyticsService {
             }
         }
         return entries;
+    }
+
+    private Map<Long, BigDecimal> groupByCategory(List<FinancialEntry> entries) {
+        Map<Long, BigDecimal> map = new HashMap<>();
+        for (var e : entries) {
+            map.merge(e.getCategoryId(), e.getAmount(), BigDecimal::add);
+        }
+        return map;
     }
 
     // ═════════════════════════════════════════════════════════
@@ -242,5 +496,60 @@ public class SpendingAnalyticsService {
         private final LocalDate previousEnd;
         private final String trend; // UP, DOWN, STABLE, NEW
         private final BigDecimal percentChange;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class BudgetStatusResult {
+        private final String categoryName;
+        private final BigDecimal budgetAmount;
+        private final BigDecimal spentAmount;
+        private final BigDecimal percentUsed;
+        private final boolean overBudget;
+        private final BigDecimal overAmount;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class OverspendingAlert {
+        private final String categoryName;
+        private final BigDecimal currentAmount;
+        private final BigDecimal previousAmount;
+        private final BigDecimal percentIncrease;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class MonthlySummaryResult {
+        private final BigDecimal totalExpense;
+        private final BigDecimal totalIncome;
+        private final List<CategoryPercentage> categoryBreakdowns;
+        private final String trendDirection; // UP, DOWN, STABLE
+        private final BigDecimal trendPercent;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class FinancialHealthResult {
+        private final BigDecimal totalIncome;
+        private final BigDecimal totalExpense;
+        private final BigDecimal savingsRate;
+        private final BigDecimal expenseToIncomeRatio;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class WeeklyPatternResult {
+        private final BigDecimal weekdayAverage;
+        private final BigDecimal weekendAverage;
+        private final DayOfWeek peakDay;
+        private final boolean spendsMoreOnWeekends;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class SmartSuggestionResult {
+        private final String categoryName;
+        private final BigDecimal potentialSavings;
     }
 }

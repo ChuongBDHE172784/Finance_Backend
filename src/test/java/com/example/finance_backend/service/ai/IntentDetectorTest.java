@@ -111,4 +111,42 @@ public class IntentDetectorTest {
         // Contains "xoa" but also "bao nhieu" → should be QUERY
         assertEquals(Intent.QUERY_TRANSACTION, result.getIntent());
     }
+
+    @Test
+    void testBudgetIntent_Vietnamese() {
+        IntentResult result = detector.detect(parse("ngân sách ăn uống còn bao nhiêu"));
+        assertEquals(Intent.BUDGET_QUERY, result.getIntent());
+        assertTrue(result.getConfidence() >= 0.8);
+    }
+
+    @Test
+    void testBudgetIntent_English() {
+        IntentResult result = detector.detect(parse("how is my budget"));
+        assertEquals(Intent.BUDGET_QUERY, result.getIntent());
+    }
+
+    @Test
+    void testMonthlySummaryIntent_Vietnamese() {
+        IntentResult result = detector.detect(parse("tóm tắt tháng này"));
+        assertEquals(Intent.MONTHLY_SUMMARY, result.getIntent());
+    }
+
+    @Test
+    void testMonthlySummaryIntent_English() {
+        IntentResult result = detector.detect(parse("monthly summary report"));
+        assertEquals(Intent.MONTHLY_SUMMARY, result.getIntent());
+    }
+
+    @Test
+    void testFinancialScoreIntent_Vietnamese() {
+        IntentResult result = detector.detect(parse("chấm điểm tài chính"));
+        assertEquals(Intent.FINANCIAL_SCORE, result.getIntent());
+        assertTrue(result.getConfidence() >= 0.8);
+    }
+
+    @Test
+    void testFinancialScoreIntent_English() {
+        IntentResult result = detector.detect(parse("what is my financial score"));
+        assertEquals(Intent.FINANCIAL_SCORE, result.getIntent());
+    }
 }

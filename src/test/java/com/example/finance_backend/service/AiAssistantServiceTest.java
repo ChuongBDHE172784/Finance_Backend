@@ -6,6 +6,7 @@ import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
+import com.example.finance_backend.repository.BudgetRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.ai.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +30,7 @@ public class AiAssistantServiceTest {
     @Mock private AccountRepository accountRepository;
     @Mock private AiMessageRepository aiMessageRepository;
     @Mock private CategoryService categoryService;
+    @Mock private BudgetRepository budgetRepository;
 
     private AiAssistantService aiAssistantService;
 
@@ -40,13 +42,15 @@ public class AiAssistantServiceTest {
         ConversationContextManager contextManager = new ConversationContextManager(textPreprocessor, entityExtractor);
         GeminiClientWrapper geminiClient = mock(GeminiClientWrapper.class);
         ResponseGenerator responseGenerator = new ResponseGenerator();
-        SpendingAnalyticsService analyticsService = new SpendingAnalyticsService(entryRepository, categoryService);
+        SpendingAnalyticsService analyticsService = new SpendingAnalyticsService(entryRepository, categoryService, budgetRepository);
+        FinancialScoreEngine scoreEngine = new FinancialScoreEngine(entryRepository, budgetRepository, analyticsService);
 
         aiAssistantService = new AiAssistantService(
                 textPreprocessor, intentDetector, entityExtractor,
                 contextManager, geminiClient, responseGenerator, analyticsService,
+                scoreEngine,
                 entryService, entryRepository, accountRepository,
-                aiMessageRepository, categoryService);
+                aiMessageRepository, categoryService, budgetRepository);
     }
 
     @Test

@@ -4,11 +4,14 @@ import com.example.finance_backend.dto.*;
 import com.example.finance_backend.dto.IntentResult.Intent;
 import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.Account;
+import com.example.finance_backend.entity.Budget;
 import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
+import com.example.finance_backend.repository.BudgetRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.ai.*;
+import com.example.finance_backend.service.ai.FinancialScoreEngine.FinancialScoreResult;
 import com.example.finance_backend.service.ai.GeminiClientWrapper.GeminiParseResult;
 import com.example.finance_backend.service.ai.GeminiClientWrapper.GeminiParsedEntry;
 import com.example.finance_backend.service.ai.GeminiClientWrapper.GeminiParsedTarget;
@@ -46,6 +49,7 @@ public class AiAssistantService {
     private final GeminiClientWrapper geminiClient;
     private final ResponseGenerator responseGenerator;
     private final SpendingAnalyticsService analyticsService;
+    private final FinancialScoreEngine financialScoreEngine;
 
     // ── Data services ──
     private final FinancialEntryService entryService;
@@ -53,6 +57,7 @@ public class AiAssistantService {
     private final AccountRepository accountRepository;
     private final AiMessageRepository aiMessageRepository;
     private final CategoryService categoryService;
+    private final BudgetRepository budgetRepository;
 
     // ═════════════════════════════════════════════════════════
     // MAIN PIPELINE ENTRY POINT
@@ -110,7 +115,7 @@ public class AiAssistantService {
                         request.getUserId(), language);
                 break;
             case QUERY_TRANSACTION:
-                response = handleQuery(parsed, geminiResult, language);
+                response = handleQuery(parsed, geminiResult, request.getUserId(), language);
                 break;
             case UPDATE_TRANSACTION:
                 response = handleUpdate(message, parsed, geminiResult, request.getAccountId(), language);
@@ -118,9 +123,21 @@ public class AiAssistantService {
             case DELETE_TRANSACTION:
                 response = handleDelete(message, parsed, geminiResult, language);
                 break;
+            case BUDGET_QUERY:
+                response = handleBudgetQuery(request.getUserId(), language);
+                break;
+            case MONTHLY_SUMMARY:
+                response = handleMonthlySummary(request.getUserId(), language);
+                break;
+            case FINANCIAL_SCORE:
+                response = handleFinancialScore(request.getUserId(), language);
+                break;
+            case SET_BUDGET:
+                response = handleSetBudget(parsed, geminiResult, request.getUserId(), language);
+                break;
             case FINANCIAL_ADVICE:
             case GENERAL_CHAT:
-                response = handleAdvice(geminiResult, language);
+                response = handleAdvice(geminiResult, request.getUserId(), language);
                 break;
             default:
                 // Context-aware: check if this is a follow-up to a clarification
@@ -277,7 +294,7 @@ public class AiAssistantService {
     // QUERY HANDLER (delegates to SpendingAnalyticsService)
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleQuery(ParsedMessage parsed, GeminiParseResult gemini, String language) {
+    private AiAssistantResponse handleQuery(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
         LocalDate today = LocalDate.now();
         LocalDate start, end;
         String typeFilter, metric;
@@ -314,6 +331,18 @@ public class AiAssistantService {
                 return buildTrendReply(start, end, typeFilter, language);
             case "PERCENTAGE":
                 return buildPercentageReply(start, end, typeFilter, language);
+            case "BUDGET":
+                return handleBudgetQuery(userId, language);
+            case "MONTHLY_SUMMARY":
+                return handleMonthlySummary(userId, language);
+            case "FINANCIAL_HEALTH":
+                return buildFinancialHealthReply(userId, language);
+            case "WEEKLY_PATTERN":
+                return buildWeeklyPatternReply(userId, start, end, language);
+            case "SMART_SUGGESTION":
+                return buildSmartSuggestionReply(userId, language);
+            case "FINANCIAL_SCORE":
+                return handleFinancialScore(userId, language);
             case "TOTAL":
             default:
                 return buildTotalReply(start, end, typeFilter, language);
@@ -546,13 +575,103 @@ public class AiAssistantService {
     // ADVICE HANDLER
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleAdvice(GeminiParseResult gemini, String language) {
+    private AiAssistantResponse handleAdvice(GeminiParseResult gemini, Long userId, String language) {
         String reply = (gemini != null && gemini.adviceReply != null && !gemini.adviceReply.isBlank())
                 ? gemini.adviceReply
                 : responseGenerator.t(language,
                 "Mình có thể giúp bạn quản lý chi tiêu, ghi nhận thu chi, và phân tích tài chính. Hãy thử hỏi nhé!",
                 "I can help you manage expenses, record transactions, and analyze finances. Just ask!");
+
+        // Enrich with financial context if userId is available
+        if (userId != null) {
+            try {
+                LocalDate now = LocalDate.now();
+                FinancialScoreResult score = financialScoreEngine.computeScore(userId, now.getMonthValue(), now.getYear());
+                String scoreContext = responseGenerator.t(language,
+                        "\n\n📊 Điểm tài chính hiện tại: " + score.getTotalScore() + "/100 (Hạng " + score.getGrade() + ")",
+                        "\n\n📊 Current Financial Score: " + score.getTotalScore() + "/100 (Grade " + score.getGrade() + ")");
+                reply += scoreContext;
+            } catch (Exception e) {
+                log.debug("Could not compute financial score for advice context: {}", e.getMessage());
+            }
+        }
+
         return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // BUDGET QUERY HANDLER
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse handleBudgetQuery(Long userId, String language) {
+        if (userId == null) {
+            return AiAssistantResponse.builder().intent("QUERY")
+                    .reply(responseGenerator.noBudgetData(language)).build();
+        }
+        List<BudgetStatusResult> statuses = analyticsService.getAllBudgetStatuses(userId, LocalDate.now());
+        if (statuses.isEmpty()) {
+            return AiAssistantResponse.builder().intent("QUERY")
+                    .reply(responseGenerator.noBudgetData(language)).build();
+        }
+        return AiAssistantResponse.builder().intent("QUERY")
+                .reply(responseGenerator.allBudgetStatusReply(statuses, language)).build();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // MONTHLY SUMMARY HANDLER
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse handleMonthlySummary(Long userId, String language) {
+        LocalDate now = LocalDate.now();
+        MonthlySummaryResult summary = analyticsService.getMonthlySummary(userId, now.getMonthValue(), now.getYear());
+        // Append overspending alerts
+        List<OverspendingAlert> alerts = analyticsService.getOverspendingAlerts(
+                userId, now.withDayOfMonth(1), now);
+        String reply = responseGenerator.monthlySummaryReply(summary, now.getMonthValue(), now.getYear(), language);
+        if (!alerts.isEmpty()) {
+            reply += "\n\n" + responseGenerator.overspendingAlertReply(alerts, language);
+        }
+        return AiAssistantResponse.builder().intent("QUERY").reply(reply).build();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // FINANCIAL SCORE HANDLER
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse handleFinancialScore(Long userId, String language) {
+        if (userId == null) {
+            return AiAssistantResponse.builder().intent("QUERY")
+                    .reply(responseGenerator.t(language,
+                            "Cần đăng nhập để xem điểm tài chính.",
+                            "Please log in to see your financial score.")).build();
+        }
+        LocalDate now = LocalDate.now();
+        FinancialScoreResult score = financialScoreEngine.computeScore(userId, now.getMonthValue(), now.getYear());
+        return AiAssistantResponse.builder().intent("QUERY")
+                .reply(responseGenerator.financialScoreReply(score, language)).build();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // ADVANCED QUERY BUILDERS
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse buildFinancialHealthReply(Long userId, String language) {
+        LocalDate now = LocalDate.now();
+        FinancialHealthResult health = analyticsService.getFinancialHealth(userId, now.getMonthValue(), now.getYear());
+        return AiAssistantResponse.builder().intent("QUERY")
+                .reply(responseGenerator.financialHealthReply(health, language)).build();
+    }
+
+    private AiAssistantResponse buildWeeklyPatternReply(Long userId, LocalDate start, LocalDate end, String language) {
+        WeeklyPatternResult pattern = analyticsService.getWeeklyPatterns(userId, start, end);
+        return AiAssistantResponse.builder().intent("QUERY")
+                .reply(responseGenerator.weeklyPatternReply(pattern, language)).build();
+    }
+
+    private AiAssistantResponse buildSmartSuggestionReply(Long userId, String language) {
+        List<SmartSuggestionResult> suggestions = analyticsService.getSmartSuggestions(userId);
+        return AiAssistantResponse.builder().intent("QUERY")
+                .reply(responseGenerator.smartSuggestionReply(suggestions, language)).build();
     }
 
     // ═════════════════════════════════════════════════════════
@@ -647,6 +766,7 @@ public class AiAssistantService {
             case "UPDATE" -> Intent.UPDATE_TRANSACTION;
             case "DELETE" -> Intent.DELETE_TRANSACTION;
             case "ADVICE" -> Intent.FINANCIAL_ADVICE;
+            case "SET_BUDGET" -> Intent.SET_BUDGET;
             default -> Intent.UNKNOWN;
         };
         return IntentResult.builder().intent(intent).confidence(0.9)
@@ -758,6 +878,70 @@ public class AiAssistantService {
         if (safe.length() > 4000) safe = safe.substring(0, 3997) + "...";
         aiMessageRepository.save(AiMessage.builder()
                 .conversationId(conversationId).role(role).content(safe).build());
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // BUDGET SETTER
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse handleSetBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
+        if (userId == null) {
+            return AiAssistantResponse.builder().intent("ADVICE")
+                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt ngân sách.", "Please log in to set a budget.")).build();
+        }
+
+        GeminiParsedEntry data = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
+                ? gemini.entries.get(0) : null;
+        
+        if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return AiAssistantResponse.builder().intent("ADVICE")
+                    .reply(responseGenerator.t(language,
+                            "Bạn muốn đặt ngân sách bao nhiêu? (Ví dụ: Ngân sách ăn uống 5 triệu)",
+                            "How much budget do you want to set? (e.g., Set food budget to 5M)")).build();
+        }
+
+        String normCat = entityExtractor.normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        Map<String, Long> nameToId = getNameToIdMap();
+        Long catId = resolveCategoryId(nameToId, normCat, null);
+
+        if (catId == null) {
+            return AiAssistantResponse.builder().intent("ADVICE")
+                    .reply(responseGenerator.t(language,
+                            "Mình không tìm thấy danh mục này. Bạn hãy chọn danh mục cụ thể nhé.",
+                            "I couldn't find this category. Please specify a valid category.")).build();
+        }
+
+        // Determine dates (default to current month, unless Gemini extracted a date)
+        LocalDate today = LocalDate.now();
+        LocalDate start = today.withDayOfMonth(1);
+        if (data.date != null) {
+             LocalDate parsedDate = parseDate(data.date, today);
+             if (parsedDate.isAfter(today)) {
+                 start = parsedDate.withDayOfMonth(1);
+             }
+        }
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+
+        // Upsert budget
+        Optional<Budget> existing = budgetRepository.findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                userId, catId, start, end);
+        
+        Budget budget = existing.orElse(new Budget());
+        budget.setUserId(userId);
+        budget.setCategoryId(catId);
+        budget.setAmount(data.amount);
+        budget.setStartDate(start);
+        budget.setEndDate(end);
+        budgetRepository.save(budget);
+
+        String catName = categoryService.getIdToNameMap().get(catId);
+        String reply = responseGenerator.t(language,
+                String.format("Vâng, mình đã ghi nhận hạn mức ngân sách cho danh mục **%s** là **%s** cho tháng %d/%d.",
+                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(), start.getYear()),
+                String.format("Okay, I've set a **%s** budget for **%s** for month %d/%d.",
+                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(), start.getYear()));
+
+        return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
     }
 
     // ── Inner helper class ──

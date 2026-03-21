@@ -1,19 +1,23 @@
 package com.example.finance_backend.service.ai;
 
+import com.example.finance_backend.service.ai.FinancialScoreEngine.FinancialScoreResult;
+import com.example.finance_backend.service.ai.SpendingAnalyticsService.*;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
  * Generates natural language responses in Vietnamese and English.
  * Handles currency formatting, clarification templates, confirmation messages,
- * and financial summary formatting.
+ * financial summary formatting, budget status, score reports, and smart suggestions.
  */
 @Component
 public class ResponseGenerator {
@@ -197,6 +201,216 @@ public class ResponseGenerator {
     }
 
     // ═════════════════════════════════════════════════════════
+    // BUDGET STATUS RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String budgetStatusReply(BudgetStatusResult status, String language) {
+        if (status.isOverBudget()) {
+            return isEnglish(language)
+                    ? String.format("⚠️ You've exceeded your %s budget by %s! (Budget: %s, Spent: %s — %s%% used)",
+                    status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                    formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                    status.getPercentUsed())
+                    : String.format("⚠️ Bạn đã vượt ngân sách %s %s! (Ngân sách: %s, Đã chi: %s — %s%%)",
+                    status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                    formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                    status.getPercentUsed());
+        }
+        return isEnglish(language)
+                ? String.format("📊 %s budget: %s%% used (%s / %s)",
+                status.getCategoryName(), status.getPercentUsed(),
+                formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language))
+                : String.format("📊 Ngân sách %s: đã dùng %s%% (%s / %s)",
+                status.getCategoryName(), status.getPercentUsed(),
+                formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language));
+    }
+
+    public String allBudgetStatusReply(List<BudgetStatusResult> statuses, String language) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, "📋 Tình trạng ngân sách:\n", "📋 Budget Status:\n"));
+        for (BudgetStatusResult s : statuses) {
+            String emoji = s.isOverBudget() ? "🔴" : (s.getPercentUsed().compareTo(new BigDecimal("80")) >= 0 ? "🟡" : "🟢");
+            sb.append(String.format("%s %s: %s%% (%s / %s)\n", emoji,
+                    s.getCategoryName(), s.getPercentUsed(),
+                    formatVnd(s.getSpentAmount(), language), formatVnd(s.getBudgetAmount(), language)));
+        }
+        return sb.toString().trim();
+    }
+
+    public String noBudgetData(String language) {
+        return t(language,
+                "Bạn chưa đặt ngân sách nào. Bạn có muốn đặt ngân sách cho tháng tới không?",
+                "You haven't set any budgets yet. Would you like to set a budget for next month?");
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // OVERSPENDING ALERT RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String overspendingAlertReply(List<OverspendingAlert> alerts, String language) {
+        if (alerts.isEmpty()) {
+            return t(language,
+                    "✅ Chi tiêu của bạn bình thường, không có khoản nào tăng bất thường.",
+                    "✅ Your spending looks normal — no unusual increases detected.");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, "⚠️ Cảnh báo chi tiêu bất thường:\n", "⚠️ Overspending Alerts:\n"));
+        for (OverspendingAlert a : alerts) {
+            sb.append(isEnglish(language)
+                    ? String.format("• %s: up %s%% (%s vs %s previously)\n",
+                    a.getCategoryName(), a.getPercentIncrease(),
+                    formatVnd(a.getCurrentAmount(), language), formatVnd(a.getPreviousAmount(), language))
+                    : String.format("• %s: tăng %s%% (%s so với %s trước đó)\n",
+                    a.getCategoryName(), a.getPercentIncrease(),
+                    formatVnd(a.getCurrentAmount(), language), formatVnd(a.getPreviousAmount(), language)));
+        }
+        return sb.toString().trim();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // MONTHLY SUMMARY RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String monthlySummaryReply(MonthlySummaryResult summary, int month, int year, String language) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(isEnglish(language)
+                ? String.format("📊 Monthly Summary (%d/%d):\n", month, year)
+                : String.format("📊 Tổng kết tháng %d/%d:\n", month, year));
+
+        sb.append(isEnglish(language)
+                ? String.format("💰 Total Income: %s\n", formatVnd(summary.getTotalIncome(), language))
+                : String.format("💰 Tổng thu: %s\n", formatVnd(summary.getTotalIncome(), language)));
+        sb.append(isEnglish(language)
+                ? String.format("💸 Total Expense: %s\n", formatVnd(summary.getTotalExpense(), language))
+                : String.format("💸 Tổng chi: %s\n", formatVnd(summary.getTotalExpense(), language)));
+
+        // Trend vs previous month
+        if (!"STABLE".equals(summary.getTrendDirection())) {
+            String arrow = "UP".equals(summary.getTrendDirection()) ? "📈" : "📉";
+            sb.append(isEnglish(language)
+                    ? String.format("%s %s%% vs last month\n", arrow, summary.getTrendPercent().abs())
+                    : String.format("%s %s%% so với tháng trước\n", arrow, summary.getTrendPercent().abs()));
+        }
+
+        // Category breakdown
+        if (summary.getCategoryBreakdowns() != null && !summary.getCategoryBreakdowns().isEmpty()) {
+            sb.append(t(language, "\n📂 Phân bổ chi tiêu:\n", "\n📂 Spending Breakdown:\n"));
+            for (CategoryPercentage cp : summary.getCategoryBreakdowns()) {
+                sb.append(String.format("  • %s: %s%% (%s)\n",
+                        cp.getCategoryName(), cp.getPercentage(), formatVnd(cp.getAmount(), language)));
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // FINANCIAL HEALTH RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String financialHealthReply(FinancialHealthResult health, String language) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, "🏥 Sức khỏe tài chính:\n", "🏥 Financial Health:\n"));
+        sb.append(isEnglish(language)
+                ? String.format("• Income: %s\n", formatVnd(health.getTotalIncome(), language))
+                : String.format("• Thu nhập: %s\n", formatVnd(health.getTotalIncome(), language)));
+        sb.append(isEnglish(language)
+                ? String.format("• Expense: %s\n", formatVnd(health.getTotalExpense(), language))
+                : String.format("• Chi tiêu: %s\n", formatVnd(health.getTotalExpense(), language)));
+        sb.append(isEnglish(language)
+                ? String.format("• Savings Rate: %s%%\n", health.getSavingsRate())
+                : String.format("• Tỷ lệ tiết kiệm: %s%%\n", health.getSavingsRate()));
+        sb.append(isEnglish(language)
+                ? String.format("• Expense-to-Income: %s%%", health.getExpenseToIncomeRatio())
+                : String.format("• Chi/Thu: %s%%", health.getExpenseToIncomeRatio()));
+        return sb.toString();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // WEEKLY PATTERN RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String weeklyPatternReply(WeeklyPatternResult pattern, String language) {
+        String peakDayName = translateDayOfWeek(pattern.getPeakDay(), language);
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, "📅 Phân tích chi tiêu theo tuần:\n", "📅 Weekly Spending Pattern:\n"));
+        sb.append(isEnglish(language)
+                ? String.format("• Weekday avg: %s\n", formatVnd(pattern.getWeekdayAverage(), language))
+                : String.format("• Trung bình ngày thường: %s\n", formatVnd(pattern.getWeekdayAverage(), language)));
+        sb.append(isEnglish(language)
+                ? String.format("• Weekend avg: %s\n", formatVnd(pattern.getWeekendAverage(), language))
+                : String.format("• Trung bình cuối tuần: %s\n", formatVnd(pattern.getWeekendAverage(), language)));
+        sb.append(isEnglish(language)
+                ? String.format("• Peak day: %s\n", peakDayName)
+                : String.format("• Ngày chi nhiều nhất: %s\n", peakDayName));
+        if (pattern.isSpendsMoreOnWeekends()) {
+            sb.append(t(language,
+                    "💡 Bạn thường chi nhiều hơn vào cuối tuần.",
+                    "💡 You tend to spend more on weekends."));
+        }
+        return sb.toString().trim();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // SMART SUGGESTION RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String smartSuggestionReply(List<SmartSuggestionResult> suggestions, String language) {
+        if (suggestions.isEmpty()) {
+            return t(language,
+                    "👍 Chi tiêu của bạn hợp lý, chưa có gợi ý cải thiện.",
+                    "👍 Your spending looks reasonable — no suggestions at this time.");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, "💡 Gợi ý tiết kiệm:\n", "💡 Smart Suggestions:\n"));
+        for (SmartSuggestionResult s : suggestions) {
+            sb.append(isEnglish(language)
+                    ? String.format("• Reduce %s by 15%% → save ~%s/month\n",
+                    s.getCategoryName(), formatVnd(s.getPotentialSavings(), language))
+                    : String.format("• Giảm %s 15%% → tiết kiệm ~%s/tháng\n",
+                    s.getCategoryName(), formatVnd(s.getPotentialSavings(), language)));
+        }
+        return sb.toString().trim();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // FINANCIAL SCORE RESPONSES
+    // ═════════════════════════════════════════════════════════
+
+    public String financialScoreReply(FinancialScoreResult score, String language) {
+        String gradeEmoji = switch (score.getGrade()) {
+            case "A" -> "🏆";
+            case "B" -> "✅";
+            case "C" -> "📊";
+            case "D" -> "⚠️";
+            default -> "🔴";
+        };
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(isEnglish(language)
+                ? String.format("%s Financial Score: %d/100 (Grade %s)\n", gradeEmoji, score.getTotalScore(), score.getGrade())
+                : String.format("%s Điểm tài chính: %d/100 (Hạng %s)\n", gradeEmoji, score.getTotalScore(), score.getGrade()));
+        sb.append(isEnglish(language)
+                ? String.format("• Savings Rate: %d/30\n", score.getSavingsRateScore())
+                : String.format("• Tỷ lệ tiết kiệm: %d/30\n", score.getSavingsRateScore()));
+        sb.append(isEnglish(language)
+                ? String.format("• Spending Stability: %d/25\n", score.getStabilityScore())
+                : String.format("• Ổn định chi tiêu: %d/25\n", score.getStabilityScore()));
+        sb.append(isEnglish(language)
+                ? String.format("• Budget Adherence: %d/25\n", score.getBudgetAdherenceScore())
+                : String.format("• Tuân thủ ngân sách: %d/25\n", score.getBudgetAdherenceScore()));
+        sb.append(isEnglish(language)
+                ? String.format("• Income Consistency: %d/20\n", score.getIncomeConsistencyScore())
+                : String.format("• Thu nhập ổn định: %d/20\n", score.getIncomeConsistencyScore()));
+
+        if (score.getSavingsRate() != null) {
+            sb.append(isEnglish(language)
+                    ? String.format("\n💰 Actual savings rate: %s%%", score.getSavingsRate())
+                    : String.format("\n💰 Tỷ lệ tiết kiệm thực tế: %s%%", score.getSavingsRate()));
+        }
+        return sb.toString().trim();
+    }
+
+    // ═════════════════════════════════════════════════════════
     // GENERIC / ERROR RESPONSES
     // ═════════════════════════════════════════════════════════
 
@@ -241,5 +455,22 @@ public class ResponseGenerator {
         if (note == null) return "";
         String trimmed = note.trim();
         return trimmed.length() <= 80 ? trimmed : trimmed.substring(0, 77) + "...";
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // PRIVATE HELPERS
+    // ═════════════════════════════════════════════════════════
+
+    private String translateDayOfWeek(DayOfWeek day, String language) {
+        if (isEnglish(language)) return day.name().charAt(0) + day.name().substring(1).toLowerCase();
+        return switch (day) {
+            case MONDAY -> "Thứ Hai";
+            case TUESDAY -> "Thứ Ba";
+            case WEDNESDAY -> "Thứ Tư";
+            case THURSDAY -> "Thứ Năm";
+            case FRIDAY -> "Thứ Sáu";
+            case SATURDAY -> "Thứ Bảy";
+            case SUNDAY -> "Chủ Nhật";
+        };
     }
 }

@@ -18,7 +18,11 @@ public class IntentResult {
         UPDATE_TRANSACTION,
         DELETE_TRANSACTION,
         FINANCIAL_ADVICE,
+        BUDGET_QUERY,
+        MONTHLY_SUMMARY,
+        FINANCIAL_SCORE,
         GENERAL_CHAT,
+        SET_BUDGET,
         UNKNOWN
     }
 
@@ -45,7 +49,11 @@ public class IntentResult {
             case UPDATE_TRANSACTION -> "UPDATE";
             case DELETE_TRANSACTION -> "DELETE";
             case FINANCIAL_ADVICE -> "ADVICE";
+            case BUDGET_QUERY -> "QUERY";
+            case MONTHLY_SUMMARY -> "QUERY";
+            case FINANCIAL_SCORE -> "QUERY";
             case GENERAL_CHAT -> "ADVICE";
+            case SET_BUDGET -> "ADVICE";
             case UNKNOWN -> "UNKNOWN";
         };
     }

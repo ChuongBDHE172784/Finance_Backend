@@ -40,12 +40,25 @@ public class IntentDetector {
     // ── ADVICE keywords ──
     private static final List<String> ADVICE_KW = List.of(
             "lam sao", "cach", "tu van", "goi y", "khuyen",
-            "tiet kiem", "quan ly", "ngan sach",
+            "tiet kiem", "quan ly",
             "how to", "advice", "suggest", "recommend", "tips", "save money",
-            "budget", "manage", "financial");
+            "manage", "financial");
 
-    // ── INSERT signal: has amount + no conflicting intent ──
-    // (INSERT is the default when there's an amount and no delete/update/query signal)
+    // ── BUDGET keywords ──
+    private static final List<String> BUDGET_KW = List.of(
+            "ngan sach", "budget", "han muc", "da dung", "con lai",
+            "vuot ngan sach", "over budget", "within budget");
+
+    // ── FINANCIAL SCORE keywords ──
+    private static final List<String> SCORE_KW = List.of(
+            "diem", "score", "cham diem", "danh gia", "xep hang",
+            "financial score", "diem tai chinh", "suc khoe tai chinh");
+
+    // ── INSIGHT / SUMMARY keywords ──
+    private static final List<String> INSIGHT_KW = List.of(
+            "phan tich", "tom tat", "bao cao", "suc khoe",
+            "summary", "report", "insight", "analysis", "health",
+            "tong ket", "monthly");
 
     /**
      * Detect intent using rule-based keyword matching.
@@ -84,7 +97,34 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 3: Check QUERY
+        // Phase 3: Check FINANCIAL SCORE
+        if (matchesKeywords(normalized, SCORE_KW)) {
+            return IntentResult.builder()
+                    .intent(Intent.FINANCIAL_SCORE)
+                    .confidence(0.9)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 4: Check BUDGET
+        if (matchesKeywords(normalized, BUDGET_KW)) {
+            return IntentResult.builder()
+                    .intent(Intent.BUDGET_QUERY)
+                    .confidence(0.85)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 5: Check MONTHLY SUMMARY / INSIGHT
+        if (matchesKeywords(normalized, INSIGHT_KW) && !hasAmount) {
+            return IntentResult.builder()
+                    .intent(Intent.MONTHLY_SUMMARY)
+                    .confidence(0.8)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 6: Check QUERY
         boolean isQuery = matchesKeywords(normalized, QUERY_KW);
         boolean isTimeQuery = matchesKeywords(normalized, TIME_QUERY_KW);
         if (isQuery || (isTimeQuery && !hasAmount)) {
@@ -96,7 +136,7 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 4: Check ADVICE
+        // Phase 7: Check ADVICE
         if (matchesKeywords(normalized, ADVICE_KW)) {
             return IntentResult.builder()
                     .intent(Intent.FINANCIAL_ADVICE)
@@ -105,7 +145,7 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 5: INSERT if there's an amount
+        // Phase 8: INSERT if there's an amount
         if (hasAmount) {
             return IntentResult.builder()
                     .intent(Intent.INSERT_TRANSACTION)
@@ -114,8 +154,7 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 6: Low-confidence — might be INSERT with missing amount, or general chat
-        // This is where Gemini fallback is most useful
+        // Phase 9: Low-confidence — might be INSERT with missing amount, or general chat
         return IntentResult.builder()
                 .intent(Intent.UNKNOWN)
                 .confidence(0.3)

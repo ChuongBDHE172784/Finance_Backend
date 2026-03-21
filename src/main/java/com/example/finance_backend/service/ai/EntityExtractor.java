@@ -97,6 +97,18 @@ public class EntityExtractor {
      */
     public String detectMetric(String normalizedText) {
         if (normalizedText == null) return "TOTAL";
+        if (TextPreprocessor.containsAny(normalizedText, "diem tai chinh", "financial score", "cham diem", "score"))
+            return "FINANCIAL_SCORE";
+        if (TextPreprocessor.containsAny(normalizedText, "ngan sach", "budget", "han muc"))
+            return "BUDGET";
+        if (TextPreprocessor.containsAny(normalizedText, "tom tat", "bao cao thang", "monthly summary", "monthly report", "tong ket"))
+            return "MONTHLY_SUMMARY";
+        if (TextPreprocessor.containsAny(normalizedText, "suc khoe tai chinh", "financial health", "savings rate", "ty le tiet kiem"))
+            return "FINANCIAL_HEALTH";
+        if (TextPreprocessor.containsAny(normalizedText, "cuoi tuan", "weekend", "thu 7", "chu nhat", "weekday"))
+            return "WEEKLY_PATTERN";
+        if (TextPreprocessor.containsAny(normalizedText, "goi y", "de xuat", "suggest", "recommendation"))
+            return "SMART_SUGGESTION";
         if (TextPreprocessor.containsAny(normalizedText, "nhieu nhat", "cao nhat", "most", "highest", "top"))
             return "TOP_CATEGORY";
         if (TextPreprocessor.containsAny(normalizedText, "danh sach", "liet ke", "list", "show", "detail", "details"))

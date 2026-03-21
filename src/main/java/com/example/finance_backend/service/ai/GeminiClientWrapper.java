@@ -106,7 +106,8 @@ public class GeminiClientWrapper {
                 OUTPUT REQUIREMENTS:
                 - Return raw JSON only, no markdown or extra text.
                 - Always use YYYY-MM-DD date format.
-                - Determine intent: INSERT (add), QUERY (query), UPDATE (edit), DELETE (delete), ADVICE (general advice/Q&A).
+                - Determine intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), SET_BUDGET (set a target budget limit).
+                - For SET_BUDGET, use entries[0] to specify categoryName and amount.
                 - If ADVICE, fill "adviceReply" with an English answer.
                 - For UPDATE/DELETE, use "target" to identify the transaction (amount, date, old category). Use "entries[0]" for new values (if UPDATE).
                 - If the user wants to delete all transactions in a time range/condition, set "target.deleteAll = true".
@@ -118,10 +119,10 @@ public class GeminiClientWrapper {
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "UNKNOWN",
                   "adviceReply": "string (only for ADVICE)",
                   "query": {
-                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE",
+                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE" | "BUDGET" | "MONTHLY_SUMMARY" | "FINANCIAL_HEALTH" | "WEEKLY_PATTERN" | "SMART_SUGGESTION" | "FINANCIAL_SCORE",
                     "type": "EXPENSE" | "INCOME" | "ALL",
                     "startDate": "YYYY-MM-DD",
                     "endDate": "YYYY-MM-DD",
@@ -146,15 +147,20 @@ public class GeminiClientWrapper {
                   ]
                 }
 
-                UPDATE/DELETE EXAMPLES:
-                - "Change yesterday's lunch to 50k": intent=UPDATE, target={noteKeywords: "lunch", date: "yesterday"}, entries=[{amount: 50000}]
-                - "Delete the 45k transaction": intent=DELETE, target={amount: 45000}
-                - "Delete all transactions today": intent=DELETE, target={date: "today", deleteAll: true}
+                SET_BUDGET EXAMPLE:
+                - "Set budget for food 5M": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
+                - "Eat phở 5M": intent=INSERT (because it's an action, not a goal)
 
                 ADVANCED QUERY EXAMPLES:
                 - "Average daily spending this month": metric=AVERAGE
                 - "Did my spending increase compared to last month": metric=TREND
                 - "Spending by category percentage": metric=PERCENTAGE
+                - "How's my budget?": metric=BUDGET
+                - "Monthly summary": metric=MONTHLY_SUMMARY
+                - "My financial health": metric=FINANCIAL_HEALTH
+                - "Do I spend more on weekends?": metric=WEEKLY_PATTERN
+                - "Any saving suggestions?": metric=SMART_SUGGESTION
+                - "What's my financial score?": metric=FINANCIAL_SCORE
 
                 ADVICE EXAMPLE:
                 - "How can I save money?": intent=ADVICE, adviceReply="To save money, you should..."
@@ -175,7 +181,8 @@ public class GeminiClientWrapper {
                 YÊU CẦU ĐẦU RA:
                 - Chỉ trả về JSON thuần, không markdown, không giải thích thêm.
                 - Luôn dùng định dạng ngày YYYY-MM-DD.
-                - Xác định intent: INSERT (thêm), QUERY (tra cứu), UPDATE (sửa), DELETE (xóa), ADVICE (tư vấn/hỏi đáp chung).
+                - Xác định intent: INSERT (thêm giao dịch), QUERY (tra cứu), UPDATE (sửa), DELETE (xóa), ADVICE (tư vấn/hỏi đáp chung), SET_BUDGET (đặt hạn mức ngân sách).
+                - Với SET_BUDGET, dùng entries[0] để chỉ định categoryName và số tiền hạn mức.
                 - Nếu là ADVICE, hãy điền câu trả lời vào trường "adviceReply".
                 - Khi UPDATE/DELETE, dùng "target" để xác định giao dịch cần tác động. Dùng "entries[0]" cho thông tin mới (nếu UPDATE).
                 - Nếu muốn xóa tất cả, đặt "target.deleteAll = true".
@@ -186,10 +193,10 @@ public class GeminiClientWrapper {
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "UNKNOWN",
                   "adviceReply": "string (chỉ dùng cho ADVICE)",
                   "query": {
-                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE",
+                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE" | "BUDGET" | "MONTHLY_SUMMARY" | "FINANCIAL_HEALTH" | "WEEKLY_PATTERN" | "SMART_SUGGESTION" | "FINANCIAL_SCORE",
                     "type": "EXPENSE" | "INCOME" | "ALL",
                     "startDate": "YYYY-MM-DD",
                     "endDate": "YYYY-MM-DD",
@@ -214,16 +221,26 @@ public class GeminiClientWrapper {
                   ]
                 }
 
+                VÍ DỤ SET_BUDGET:
+                - "Hạn mức ăn uống 5 triệu": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
+                - "Ăn phở 5 triệu": intent=INSERT (vì đây là hành động tiêu phí, không phải đặt mục tiêu)
+
                 VÍ DỤ UPDATE/DELETE:
                 - "Sửa khoản ăn trưa hôm qua thành 50k": intent=UPDATE, target={noteKeywords: "ăn trưa", date: "hôm qua"}, entries=[{amount: 50000}]
                 - "Xóa giao dịch 45k": intent=DELETE, target={amount: 45000}
                 - "Xóa tất cả giao dịch hôm nay": intent=DELETE, target={date: "hôm nay", deleteAll: true}
-                - "Xóa giao dịch đổ xăng 50k": intent=DELETE, target={amount: 50000, noteKeywords: "đổ xăng"} (TUYỆT ĐỐI KHÔNG CHỌN INSERT/QUERY)
+                - "Xóa giao dịch đổ xăng 50k": intent=DELETE, target={amount: 50000, noteKeywords: "đổ xăng"}
 
                 VÍ DỤ QUERY NÂNG CAO:
                 - "Trung bình mỗi ngày tiêu bao nhiêu": metric=AVERAGE
                 - "Chi phí tháng này tăng hay giảm": metric=TREND
                 - "Tỷ lệ chi tiêu các nhóm": metric=PERCENTAGE
+                - "Ngân sách ăn uống còn bao nhiêu": metric=BUDGET
+                - "Tóm tắt tháng này": metric=MONTHLY_SUMMARY
+                - "Sức khỏe tài chính": metric=FINANCIAL_HEALTH
+                - "Cuối tuần tiêu nhiều hơn không": metric=WEEKLY_PATTERN
+                - "Gợi ý tiết kiệm": metric=SMART_SUGGESTION
+                - "Chấm điểm tài chính": metric=FINANCIAL_SCORE
 
                 VÍ DỤ ADVICE:
                 - "Làm sao tiết kiệm tiền?": intent=ADVICE, adviceReply="Để tiết kiệm tiền, bạn nên..."
