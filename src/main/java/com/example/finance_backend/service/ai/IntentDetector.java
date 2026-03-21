@@ -1,0 +1,135 @@
+package com.example.finance_backend.service.ai;
+
+import com.example.finance_backend.dto.IntentResult;
+import com.example.finance_backend.dto.IntentResult.Intent;
+import com.example.finance_backend.dto.IntentResult.Source;
+import com.example.finance_backend.dto.ParsedMessage;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+/**
+ * Two-phase intent detector: rule-based first (fast, no API cost),
+ * Gemini fallback when rules can't determine intent.
+ */
+@Component
+public class IntentDetector {
+
+    // ── DELETE keywords ──
+    private static final List<String> DELETE_KW = List.of(
+            "xoa", "huy", "bo qua", "delete", "remove", "erase", "clear", "cancel");
+
+    // ── UPDATE keywords ──
+    private static final List<String> UPDATE_KW = List.of(
+            "sua", "doi", "cap nhat", "thanh", "update", "change", "edit", "set", "replace");
+
+    // ── QUERY keywords ──
+    private static final List<String> QUERY_KW = List.of(
+            "bao nhieu", "tong", "thong ke", "nhieu nhat", "cao nhat",
+            "danh sach", "liet ke", "trung binh",
+            "how much", "total", "summary", "most", "highest", "list", "show",
+            "average", "trend", "percent", "percentage", "ratio");
+
+    // ── Time period keywords that strengthen QUERY intent ──
+    private static final List<String> TIME_QUERY_KW = List.of(
+            "thang nay", "thang truoc", "hom nay", "hom qua", "nam nay",
+            "tuan nay", "tuan truoc",
+            "this month", "last month", "today", "yesterday", "this year",
+            "last year", "this week", "last week");
+
+    // ── ADVICE keywords ──
+    private static final List<String> ADVICE_KW = List.of(
+            "lam sao", "cach", "tu van", "goi y", "khuyen",
+            "tiet kiem", "quan ly", "ngan sach",
+            "how to", "advice", "suggest", "recommend", "tips", "save money",
+            "budget", "manage", "financial");
+
+    // ── INSERT signal: has amount + no conflicting intent ──
+    // (INSERT is the default when there's an amount and no delete/update/query signal)
+
+    /**
+     * Detect intent using rule-based keyword matching.
+     * Returns IntentResult with confidence score.
+     */
+    public IntentResult detect(ParsedMessage parsed) {
+        String normalized = parsed.getNormalizedText();
+        if (normalized == null || normalized.isBlank()) {
+            return IntentResult.builder()
+                    .intent(Intent.UNKNOWN)
+                    .confidence(0.0)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        boolean hasAmount = parsed.hasAmounts();
+
+        // Phase 1: Check DELETE (highest priority when keyword is present)
+        if (matchesKeywords(normalized, DELETE_KW)
+                && !normalized.contains("bao nhieu")
+                && !normalized.contains("how much")
+                && !normalized.contains("how many")) {
+            return IntentResult.builder()
+                    .intent(Intent.DELETE_TRANSACTION)
+                    .confidence(0.9)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 2: Check UPDATE
+        if (matchesKeywords(normalized, UPDATE_KW) && !matchesKeywords(normalized, DELETE_KW)) {
+            return IntentResult.builder()
+                    .intent(Intent.UPDATE_TRANSACTION)
+                    .confidence(0.85)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 3: Check QUERY
+        boolean isQuery = matchesKeywords(normalized, QUERY_KW);
+        boolean isTimeQuery = matchesKeywords(normalized, TIME_QUERY_KW);
+        if (isQuery || (isTimeQuery && !hasAmount)) {
+            double confidence = isQuery ? 0.85 : 0.65;
+            return IntentResult.builder()
+                    .intent(Intent.QUERY_TRANSACTION)
+                    .confidence(confidence)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 4: Check ADVICE
+        if (matchesKeywords(normalized, ADVICE_KW)) {
+            return IntentResult.builder()
+                    .intent(Intent.FINANCIAL_ADVICE)
+                    .confidence(0.8)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 5: INSERT if there's an amount
+        if (hasAmount) {
+            return IntentResult.builder()
+                    .intent(Intent.INSERT_TRANSACTION)
+                    .confidence(0.75)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 6: Low-confidence — might be INSERT with missing amount, or general chat
+        // This is where Gemini fallback is most useful
+        return IntentResult.builder()
+                .intent(Intent.UNKNOWN)
+                .confidence(0.3)
+                .source(Source.RULE)
+                .build();
+    }
+
+    /**
+     * Checks if any of the keywords appear in the text.
+     */
+    private boolean matchesKeywords(String text, List<String> keywords) {
+        for (String kw : keywords) {
+            if (text.contains(kw)) return true;
+        }
+        return false;
+    }
+}

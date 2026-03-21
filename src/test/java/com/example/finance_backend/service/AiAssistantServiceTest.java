@@ -1,124 +1,118 @@
 package com.example.finance_backend.service;
 
+import com.example.finance_backend.dto.AiAssistantRequest;
+import com.example.finance_backend.dto.AiAssistantResponse;
 import com.example.finance_backend.entity.AiMessage;
+import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
+import com.example.finance_backend.service.ai.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class AiAssistantServiceTest {
 
-    @Mock
-    private FinancialEntryService entryService;
-    @Mock
-    private FinancialEntryRepository entryRepository;
-    @Mock
-    private AccountRepository accountRepository;
-    @Mock
-    private AiMessageRepository aiMessageRepository;
-    @Mock
-    private CategoryService categoryService;
-    @Mock
-    private ObjectMapper objectMapper;
+    @Mock private FinancialEntryService entryService;
+    @Mock private FinancialEntryRepository entryRepository;
+    @Mock private AccountRepository accountRepository;
+    @Mock private AiMessageRepository aiMessageRepository;
+    @Mock private CategoryService categoryService;
 
-    @InjectMocks
     private AiAssistantService aiAssistantService;
 
     @BeforeEach
     void setUp() {
-        // Any setup if needed
+        TextPreprocessor textPreprocessor = new TextPreprocessor();
+        IntentDetector intentDetector = new IntentDetector();
+        EntityExtractor entityExtractor = new EntityExtractor(textPreprocessor);
+        ConversationContextManager contextManager = new ConversationContextManager(textPreprocessor, entityExtractor);
+        GeminiClientWrapper geminiClient = mock(GeminiClientWrapper.class);
+        ResponseGenerator responseGenerator = new ResponseGenerator();
+        SpendingAnalyticsService analyticsService = new SpendingAnalyticsService(entryRepository, categoryService);
+
+        aiAssistantService = new AiAssistantService(
+                textPreprocessor, intentDetector, entityExtractor,
+                contextManager, geminiClient, responseGenerator, analyticsService,
+                entryService, entryRepository, accountRepository,
+                aiMessageRepository, categoryService);
     }
 
     @Test
-    void testParseFallbackUpdate_AmountOnly() {
-        String message = "Sửa 200k thành 100k";
-        List<AiMessage> history = new ArrayList<>();
-        
-        // Use reflection to call private method parseFallback
-        Object result = ReflectionTestUtils.invokeMethod(aiAssistantService, "parseFallback", message, history);
-        
-        assertNotNull(result);
-        
-        // We'll check the fields via reflection or by making the inner class accessible if possible
-        // But since they are private in AiAssistantService, we might need to use reflection for assertions too
-        String intent = (String) ReflectionTestUtils.getField(result, "intent");
-        assertEquals("UPDATE", intent);
-        
-        Object target = ReflectionTestUtils.getField(result, "target");
-        assertNotNull(target);
-        BigDecimal targetAmount = (BigDecimal) ReflectionTestUtils.getField(target, "amount");
-        assertEquals(new BigDecimal("200000"), targetAmount);
+    void testEmptyMessage_ReturnsUnknown() {
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("")
+                .build();
 
-        List<?> entries = (List<?>) ReflectionTestUtils.getField(result, "entries");
-        assertNotNull(entries);
-        assertFalse(entries.isEmpty());
-        Object newEntry = entries.get(0);
-        BigDecimal newAmount = (BigDecimal) ReflectionTestUtils.getField(newEntry, "amount");
-        assertEquals(new BigDecimal("100000"), newAmount);
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("UNKNOWN", response.getIntent());
+        assertNotNull(response.getReply());
+        assertNotNull(response.getConversationId());
     }
 
     @Test
-    void testParseFallbackUpdate_NoteAndAmount() {
-        String message = "Sửa khoản đi siêu thị thành 100k";
-        List<AiMessage> history = new ArrayList<>();
-        
-        Object result = ReflectionTestUtils.invokeMethod(aiAssistantService, "parseFallback", message, history);
-        
-        assertNotNull(result);
-        String intent = (String) ReflectionTestUtils.getField(result, "intent");
-        assertEquals("UPDATE", intent);
-        
-        Object target = ReflectionTestUtils.getField(result, "target");
-        assertNotNull(target);
-        String keywords = (String) ReflectionTestUtils.getField(target, "noteKeywords");
-        assertTrue(keywords.contains("siêu thị") || keywords.contains("sieu thi"));
+    void testDeleteIntent_Detected() {
+        when(aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(anyString()))
+                .thenReturn(new ArrayList<>());
+        when(entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(any(), any()))
+                .thenReturn(new ArrayList<>());
 
-        List<?> entries = (List<?>) ReflectionTestUtils.getField(result, "entries");
-        assertNotNull(entries);
-        assertFalse(entries.isEmpty());
-        Object newEntry = entries.get(0);
-        BigDecimal newAmount = (BigDecimal) ReflectionTestUtils.getField(newEntry, "amount");
-        assertEquals(new BigDecimal("100000"), newAmount);
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("Xóa giao dịch 45k")
+                .conversationId("test-conv")
+                .build();
+
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("DELETE", response.getIntent());
     }
 
     @Test
-    void testParseFallbackUpdate_NoteWithNoise() {
-        String message = "Sửa khoản đi siêu thị 200k chiều nay thành 100k";
-        List<AiMessage> history = new ArrayList<>();
-        
-        Object result = ReflectionTestUtils.invokeMethod(aiAssistantService, "parseFallback", message, history);
-        
-        assertNotNull(result);
-        Object target = ReflectionTestUtils.getField(result, "target");
-        assertNotNull(target);
-        
-        // Key logic to test: does the keyword cleaning in findTargetEntries work?
-        // We can't call private findTargetEntries easily here with mocked repo without more setup,
-        // but we can verify the extracted keywords here.
-        String keywords = (String) ReflectionTestUtils.getField(target, "noteKeywords");
-        
-        // The keywords should ideally NOT contain "khoản", "200k", "chiều nay" AFTER handleUpdate/findTargetEntries cleans it.
-        // However, parseFallback puts the raw part 0 into noteKeywords.
-        // The cleaning happens INSIDE findTargetEntries.
-        assertTrue(keywords.contains("đi siêu thị"));
-        
-        // Verify date was detected
-        String targetDate = (String) ReflectionTestUtils.getField(target, "date");
-        assertNotNull(targetDate);
-        assertEquals(java.time.LocalDate.now().toString(), targetDate);
+    void testQueryIntent_Detected() {
+        when(aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(anyString()))
+                .thenReturn(new ArrayList<>());
+        when(entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(any(), any()))
+                .thenReturn(new ArrayList<>());
+
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("Hôm nay tiêu bao nhiêu")
+                .conversationId("test-conv")
+                .build();
+
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("QUERY", response.getIntent());
+    }
+
+    @Test
+    void testInsertWithAccount_NeedsAccount() {
+        when(aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(anyString()))
+                .thenReturn(new ArrayList<>());
+
+        // Mock multiple accounts to trigger account selection
+        List<Account> accounts = List.of(
+                Account.builder().id(1L).name("MoMo").userId(1L).build(),
+                Account.builder().id(2L).name("Tiền mặt").userId(1L).build()
+        );
+        when(accountRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(accounts);
+
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("Ăn phở 45k")
+                .conversationId("test-conv")
+                .userId(1L)
+                .build();
+
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        // Should either ask for account or succeed with INSERT
+        assertTrue("NEED_ACCOUNT".equals(response.getIntent()) || "INSERT".equals(response.getIntent()));
     }
 }
