@@ -2,7 +2,6 @@ package com.example.finance_backend.service;
 
 import com.example.finance_backend.dto.AiAssistantRequest;
 import com.example.finance_backend.dto.AiAssistantResponse;
-import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
 import com.example.finance_backend.repository.BudgetRepository;
@@ -104,16 +103,9 @@ public class AiAssistantServiceTest {
     }
 
     @Test
-    void testInsertWithAccount_NeedsAccount() {
+    void testInsert_ReturnsDraft() {
         when(aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(anyString()))
                 .thenReturn(new ArrayList<>());
-
-        // Mock multiple accounts to trigger account selection
-        List<Account> accounts = List.of(
-                Account.builder().id(1L).name("MoMo").userId(1L).build(),
-                Account.builder().id(2L).name("Tiền mặt").userId(1L).build()
-        );
-        when(accountRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(accounts);
 
         AiAssistantRequest request = AiAssistantRequest.builder()
                 .message("Ăn phở 45k")
@@ -122,7 +114,63 @@ public class AiAssistantServiceTest {
                 .build();
 
         AiAssistantResponse response = aiAssistantService.handle(request);
-        // Should either ask for account or succeed with INSERT
-        assertTrue("NEED_ACCOUNT".equals(response.getIntent()) || "INSERT".equals(response.getIntent()));
+        assertTrue(response.getIsDraft());
+        assertNotNull(response.getEntries());
+        assertEquals(1, response.getEntries().size());
+        assertTrue(response.getReply().contains("kiểm tra lại") || response.getReply().contains("review"));
+    }
+
+    @Test
+    void testInsert_SavesOnConfirmation() {
+        // Setup mock Gemini to return confirmation
+        GeminiClientWrapper.GeminiParseResult gemini = new GeminiClientWrapper.GeminiParseResult();
+        gemini.intent = "INSERT";
+        gemini.isConfirmation = true;
+        GeminiClientWrapper.GeminiParsedEntry geminiEntry = new GeminiClientWrapper.GeminiParsedEntry();
+        geminiEntry.amount = new java.math.BigDecimal("45000");
+        geminiEntry.categoryName = "Ăn uống";
+        gemini.entries = List.of(geminiEntry);
+
+        // Access the geminiClient mock created in BeforeEach via reflection or just use the one we know is there.
+        // Actually, we can just use the 'geminiClient' field if we had one. 
+        // Let's re-mock it and inject it.
+        GeminiClientWrapper geminiClient = mock(GeminiClientWrapper.class);
+        when(geminiClient.parse(anyString(), any(), any(), anyString())).thenReturn(gemini);
+        
+        // Use a real context manager and other components as in setUp
+        TextPreprocessor tp = new TextPreprocessor();
+        EntityExtractor ee = new EntityExtractor(tp);
+        aiAssistantService = new AiAssistantService(
+                tp, new IntentDetector(), ee,
+                new ConversationContextManager(tp, ee), geminiClient, new ResponseGenerator(), 
+                mock(SpendingAnalyticsService.class), mock(FinancialScoreEngine.class),
+                entryService, entryRepository, accountRepository,
+                aiMessageRepository, categoryService, budgetRepository, categoryRepository);
+
+        when(aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(anyString()))
+                .thenReturn(new ArrayList<>());
+        
+        // Mock account resolution
+        com.example.finance_backend.entity.Account account = com.example.finance_backend.entity.Account.builder().id(1L).userId(1L).build();
+        when(accountRepository.findByUserIdOrderByNameAsc(any())).thenReturn(List.of(account));
+        when(categoryService.getIdToNameMap()).thenReturn(java.util.Map.of(1L, "Ăn uống"));
+
+        // Mock entry service
+        com.example.finance_backend.dto.FinancialEntryDto dto = new com.example.finance_backend.dto.FinancialEntryDto();
+        dto.setCategoryName("Ăn uống");
+        when(entryService.create(any(), any())).thenReturn(dto);
+
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("Lưu đi")
+                .conversationId("test-conv")
+                .userId(1L)
+                .build();
+
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        
+        assertFalse(Boolean.TRUE.equals(response.getIsDraft()));
+        assertEquals(1, response.getCreatedCount());
+        assertTrue(response.getReply().contains("Đã lưu") || response.getReply().contains("Saved"));
+        verify(entryService, times(1)).create(any(), any());
     }
 }

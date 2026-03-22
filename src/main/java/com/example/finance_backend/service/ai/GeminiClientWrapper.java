@@ -115,20 +115,28 @@ public class GeminiClientWrapper {
                 Conversation history:
                 %s
 
+                MULTIMODAL INSTRUCTIONS:
+                - If an image is provided, it is likely a receipt, invoice, or bill.
+                - Analyze the image to extract all transaction details (amount, category, note/items, date).
+                - Even if the text input is empty, prioritize extracting data from the image.
+                - If the image contains multiple distinct items or receipts, extract them into the "entries" array.
+
                 OUTPUT REQUIREMENTS:
                 - Return ONLY pure JSON, no markdown, no extra explanation.
                 - Use YYYY-MM-DD date format.
                 - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), SET_BUDGET (set an expense budget limit), SET_INCOME_TARGET (set an income target/goal).
                 - For SET_BUDGET: use entries[0] for categoryName and limit amount. Category MUST be EXPENSE type.
                 - For SET_INCOME_TARGET: use entries[0] for categoryName and target amount. Category MUST be INCOME type.
-                - IMPORTANT: "Budget" / "Expense Limit" = SET_BUDGET. "Goal" / "Income Target" = SET_INCOME_TARGET.
-                - If the user says "set a target" or "set a budget" without amount/category, still select the corresponding intent and leave fields empty. DO NOT select ADVICE for these cases.
-                - DO NOT fill "adviceReply" if intent is SET_BUDGET or SET_INCOME_TARGET.
+                - "Budget" / "Expense Limit" = SET_BUDGET. "Goal" / "Income Target" = SET_INCOME_TARGET.
+                - If the intent involves an image of a purchase/payment, always set intent to "INSERT" and set isConfirmation to false.
+                - If the user explicitly confirms a previously proposed transaction (e.g., "yes", "save", "ok", "confirm"), set isConfirmation to true.
+                - If the user modifies a previously proposed transaction (e.g., "change amount to 50k"), set isConfirmation to false and update the entries.
                 - %s
 
                 SCHEMA:
                 {
                   "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "SET_INCOME_TARGET" | "UNKNOWN",
+                  "isConfirmation": boolean,
                   "adviceReply": "string (only for ADVICE)",
                   "query": {
                     "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE" | "BUDGET" | "MONTHLY_SUMMARY" | "FINANCIAL_HEALTH" | "WEEKLY_PATTERN" | "SMART_SUGGESTION" | "FINANCIAL_SCORE",
@@ -157,14 +165,16 @@ public class GeminiClientWrapper {
                 }
 
                 EXAMPLES:
-                - "Set budget for food 5M": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
-                - "Set income goal for salary 20M": intent=SET_INCOME_TARGET, entries=[{amount: 20000000, categoryName: "Lương"}]
-                - "How can I save?": intent=ADVICE, adviceReply="..."
+                - [Image and "Set budget for food 5M"]: intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}], isConfirmation=false
+                - [Receipt Image of a 50k Coffee]: intent=INSERT, entries=[{amount: 50000, categoryName: "Ăn uống", note: "Coffee"}], isConfirmation=false
+                - "Yes, save it" (after a 50k Coffee was proposed): intent=INSERT, entries=[{amount: 50000, ...}], isConfirmation=true
+                - "How can I save?": intent=ADVICE, adviceReply="...", isConfirmation=false
 
                 INPUT:
                 %s
                 """.formatted(langName, today.format(DATE_FMT), categories, history, adviceInstr, message);
     }
+
 
     // ═════════════════════════════════════════════════════════
     // API HELPERS
@@ -240,6 +250,7 @@ public class GeminiClientWrapper {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GeminiParseResult {
         public String intent;
+        public Boolean isConfirmation;
         public String adviceReply;
         public GeminiParsedQuery query;
         public GeminiParsedTarget target;

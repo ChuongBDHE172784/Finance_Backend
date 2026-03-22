@@ -25,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -32,7 +35,8 @@ import java.util.stream.Collectors;
 
 /**
  * AI Assistant orchestrator — delegates to pipeline components:
- * TextPreprocessor → IntentDetector → EntityExtractor → ConversationContextManager
+ * TextPreprocessor → IntentDetector → EntityExtractor →
+ * ConversationContextManager
  * → SpendingAnalyticsService → ResponseGenerator
  *
  * Also uses GeminiClientWrapper for complex NLU when rules fail.
@@ -106,6 +110,13 @@ public class AiAssistantService {
                 && !"UNKNOWN".equalsIgnoreCase(geminiResult.intent)) {
             // Gemini succeeded — use its intent
             intentResult = mapGeminiIntent(geminiResult.intent);
+        } else if (geminiResult != null && geminiResult.entries != null && !geminiResult.entries.isEmpty()) {
+            // Gemini found entries (likely from image) but didn't label intent clearly
+            intentResult = IntentResult.builder()
+                    .intent(Intent.INSERT_TRANSACTION)
+                    .confidence(0.8)
+                    .source(IntentResult.Source.GEMINI)
+                    .build();
         } else {
             // Rule-based fallback
             intentResult = intentDetector.detect(parsed);
@@ -148,7 +159,7 @@ public class AiAssistantService {
                 break;
             default:
                 // Context-aware: check if this is a follow-up to a clarification
-                response = handleContextualFallback(parsed, history, request, language);
+                response = handleContextualFallback(parsed, geminiResult, history, request, language);
                 break;
         }
 
@@ -160,8 +171,8 @@ public class AiAssistantService {
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleInsert(String originalMessage, ParsedMessage parsed,
-                                              GeminiParseResult gemini,
-                                              Long forcedAccountId, Long userId, String language) {
+            GeminiParseResult gemini,
+            Long forcedAccountId, Long userId, String language) {
         // Extract transaction slots from Gemini or rules
         List<TransactionSlot> slots;
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
@@ -181,6 +192,35 @@ public class AiAssistantService {
                     .intent("INSERT")
                     .refreshRequired(false)
                     .reply(responseGenerator.insertEmpty(language))
+                    .build();
+        }
+
+        // ── DRAFT WORKFLOW LOGIC ──
+        // Only save if Gemini explicitly confirmed it's a confirmation turn.
+        // Otherwise, present a draft to the user.
+        boolean isConfirmation = gemini != null && Boolean.TRUE.equals(gemini.isConfirmation);
+        if (!isConfirmation) {
+            List<GeminiParsedEntry> draftEntries;
+            if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
+                draftEntries = gemini.entries;
+            } else {
+                // Convert slots to GeminiParsedEntry for the DTO
+                draftEntries = slots.stream().map(s -> {
+                    GeminiParsedEntry e = new GeminiParsedEntry();
+                    e.amount = s.getAmount();
+                    e.categoryName = s.getCategoryName();
+                    e.note = s.getNote();
+                    e.type = s.getType();
+                    e.date = s.getDate();
+                    return e;
+                }).collect(Collectors.toList());
+            }
+
+            return AiAssistantResponse.builder()
+                    .intent("INSERT")
+                    .isDraft(true)
+                    .entries(draftEntries)
+                    .reply(responseGenerator.draftMessage(draftEntries, language))
                     .build();
         }
 
@@ -245,19 +285,25 @@ public class AiAssistantService {
                 continue;
 
             String type = slot.getType() == null || slot.getType().isBlank()
-                    ? "EXPENSE" : slot.getType().toUpperCase(Locale.ROOT);
-            if (!"EXPENSE".equals(type) && !"INCOME".equals(type)) type = "EXPENSE";
+                    ? "EXPENSE"
+                    : slot.getType().toUpperCase(Locale.ROOT);
+            if (!"EXPENSE".equals(type) && !"INCOME".equals(type))
+                type = "EXPENSE";
 
             String resolvedCategory = entityExtractor.normalizeCategoryName(slot.getCategoryName());
-            if ("INCOME".equals(type)) resolvedCategory = "Nạp tiền";
-            else if (resolvedCategory == null || resolvedCategory.isBlank()) resolvedCategory = null;
+            if ("INCOME".equals(type))
+                resolvedCategory = "Nạp tiền";
+            else if (resolvedCategory == null || resolvedCategory.isBlank())
+                resolvedCategory = null;
 
             Long preferredFallback = "INCOME".equals(type) ? incomeCategoryId : fallbackCategoryId;
             Long categoryId = resolveCategoryId(nameToId, resolvedCategory, preferredFallback);
             LocalDate date = parseDate(slot.getDate(), LocalDate.now());
             String note = slot.getNote() != null && !slot.getNote().isBlank()
-                    ? slot.getNote().trim() : originalMessage;
-            if (note.length() > 2000) note = note.substring(0, 1997) + "...";
+                    ? slot.getNote().trim()
+                    : originalMessage;
+            if (note.length() > 2000)
+                note = note.substring(0, 1997) + "...";
 
             CreateEntryRequest req = CreateEntryRequest.builder()
                     .amount(slot.getAmount())
@@ -301,7 +347,8 @@ public class AiAssistantService {
     // QUERY HANDLER (delegates to SpendingAnalyticsService)
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleQuery(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
+    private AiAssistantResponse handleQuery(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
+            String language) {
         LocalDate today = LocalDate.now();
         LocalDate start, end;
         String typeFilter, metric;
@@ -323,8 +370,13 @@ public class AiAssistantService {
             metric = entityExtractor.detectMetric(normalized);
         }
 
-        if (end.isBefore(start)) { LocalDate tmp = start; start = end; end = tmp; }
-        if (!List.of("EXPENSE", "INCOME", "TRANSFER", "ALL").contains(typeFilter)) typeFilter = "EXPENSE";
+        if (end.isBefore(start)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+        if (!List.of("EXPENSE", "INCOME", "TRANSFER", "ALL").contains(typeFilter))
+            typeFilter = "EXPENSE";
 
         // Use SpendingAnalyticsService for analytics
         switch (metric) {
@@ -359,16 +411,20 @@ public class AiAssistantService {
     private AiAssistantResponse buildTotalReply(LocalDate start, LocalDate end, String typeFilter, String language) {
         BigDecimal total = analyticsService.getTotalSpending(start, end, typeFilter);
         String label;
-        if ("ALL".equals(typeFilter)) label = responseGenerator.t(language, "Tổng giao dịch", "Total transactions");
-        else if ("INCOME".equals(typeFilter)) label = responseGenerator.t(language, "Tổng thu", "Total income");
-        else label = responseGenerator.t(language, "Tổng chi", "Total expense");
+        if ("ALL".equals(typeFilter))
+            label = responseGenerator.t(language, "Tổng giao dịch", "Total transactions");
+        else if ("INCOME".equals(typeFilter))
+            label = responseGenerator.t(language, "Tổng thu", "Total income");
+        else
+            label = responseGenerator.t(language, "Tổng chi", "Total expense");
         return AiAssistantResponse.builder()
                 .intent("QUERY")
                 .reply(responseGenerator.totalReply(start, end, total, label, language))
                 .build();
     }
 
-    private AiAssistantResponse buildTopCategoryReply(LocalDate start, LocalDate end, String typeFilter, String language) {
+    private AiAssistantResponse buildTopCategoryReply(LocalDate start, LocalDate end, String typeFilter,
+            String language) {
         List<CategoryTotal> top = analyticsService.getTopCategories(start, end, typeFilter, 1);
         if (top.isEmpty()) {
             return AiAssistantResponse.builder().intent("QUERY")
@@ -377,7 +433,8 @@ public class AiAssistantService {
         CategoryTotal first = top.get(0);
         return AiAssistantResponse.builder()
                 .intent("QUERY")
-                .reply(responseGenerator.topCategoryReply(start, end, first.getCategoryName(), first.getTotal(), language))
+                .reply(responseGenerator.topCategoryReply(start, end, first.getCategoryName(), first.getTotal(),
+                        language))
                 .build();
     }
 
@@ -397,8 +454,8 @@ public class AiAssistantService {
         String label = "ALL".equals(typeFilter)
                 ? responseGenerator.t(language, "giao dịch", "transactions")
                 : ("INCOME".equals(typeFilter)
-                ? responseGenerator.t(language, "thu", "income")
-                : responseGenerator.t(language, "chi", "expense"));
+                        ? responseGenerator.t(language, "thu", "income")
+                        : responseGenerator.t(language, "chi", "expense"));
 
         String trendText;
         switch (trend.getTrend()) {
@@ -427,7 +484,8 @@ public class AiAssistantService {
                 .build();
     }
 
-    private AiAssistantResponse buildPercentageReply(LocalDate start, LocalDate end, String typeFilter, String language) {
+    private AiAssistantResponse buildPercentageReply(LocalDate start, LocalDate end, String typeFilter,
+            String language) {
         PercentageBreakdownResult result = analyticsService.getSpendingByCategory(start, end, typeFilter);
         if (result.getTotal().compareTo(BigDecimal.ZERO) <= 0) {
             return AiAssistantResponse.builder().intent("QUERY")
@@ -443,7 +501,7 @@ public class AiAssistantService {
     }
 
     private AiAssistantResponse buildListReply(LocalDate start, LocalDate end, String typeFilter,
-                                                Integer limit, String categoryNameFilter, String language) {
+            Integer limit, String categoryNameFilter, String language) {
         int max = (limit == null || limit <= 0) ? 10 : Math.min(limit, 20);
         List<FinancialEntry> entries = analyticsService.getRecentTransactions(start, end, typeFilter, max);
 
@@ -471,7 +529,8 @@ public class AiAssistantService {
             String catName = idToName.getOrDefault(e.getCategoryId(), "Khác");
             String note = e.getNote() != null ? e.getNote() : "";
             sb.append(String.format("- %s • %s", responseGenerator.formatVnd(e.getAmount(), language), catName));
-            if (!note.isBlank()) sb.append(" (").append(responseGenerator.trimNote(note)).append(")");
+            if (!note.isBlank())
+                sb.append(" (").append(responseGenerator.trimNote(note)).append(")");
             sb.append("\n");
         }
         return AiAssistantResponse.builder().intent("QUERY").reply(sb.toString().trim()).build();
@@ -482,7 +541,7 @@ public class AiAssistantService {
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleUpdate(String originalMessage, ParsedMessage parsed,
-                                              GeminiParseResult gemini, Long forcedAccountId, String language) {
+            GeminiParseResult gemini, Long forcedAccountId, String language) {
         List<FinancialEntry> targets;
         GeminiParsedTarget target = gemini != null ? gemini.target : null;
 
@@ -506,7 +565,8 @@ public class AiAssistantService {
 
         // Get new data
         GeminiParsedEntry newData = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
-                ? gemini.entries.get(0) : null;
+                ? gemini.entries.get(0)
+                : null;
 
         if (newData == null) {
             // Try salvage from message pattern "thành/to"
@@ -518,11 +578,14 @@ public class AiAssistantService {
                     .reply(responseGenerator.updateWhatToChange(language)).build();
         }
 
-        if (newData.amount != null) entry.setAmount(newData.amount);
-        if (newData.note != null && !newData.note.isBlank()) entry.setNote(newData.note);
+        if (newData.amount != null)
+            entry.setAmount(newData.amount);
+        if (newData.note != null && !newData.note.isBlank())
+            entry.setNote(newData.note);
         if (newData.date != null && !newData.date.isBlank()) {
             LocalDate d = parseDate(newData.date, null);
-            if (d != null) entry.setTransactionDate(d);
+            if (d != null)
+                entry.setTransactionDate(d);
         }
         if (newData.categoryName != null && !newData.categoryName.isBlank()) {
             String normCat = entityExtractor.normalizeCategoryName(newData.categoryName);
@@ -543,7 +606,7 @@ public class AiAssistantService {
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleDelete(String originalMessage, ParsedMessage parsed,
-                                              GeminiParseResult gemini, String language) {
+            GeminiParseResult gemini, String language) {
         List<FinancialEntry> targets;
         GeminiParsedTarget target = gemini != null ? gemini.target : null;
         boolean deleteAll = target != null && Boolean.TRUE.equals(target.deleteAll);
@@ -586,17 +649,20 @@ public class AiAssistantService {
         String reply = (gemini != null && gemini.adviceReply != null && !gemini.adviceReply.isBlank())
                 ? gemini.adviceReply
                 : responseGenerator.t(language,
-                "Mình có thể giúp bạn quản lý chi tiêu, ghi nhận thu chi, và phân tích tài chính. Hãy thử hỏi nhé!",
-                "I can help you manage expenses, record transactions, and analyze finances. Just ask!");
+                        "Mình có thể giúp bạn quản lý chi tiêu, ghi nhận thu chi, và phân tích tài chính. Hãy thử hỏi nhé!",
+                        "I can help you manage expenses, record transactions, and analyze finances. Just ask!");
 
         // Enrich with financial context if userId is available
         if (userId != null) {
             try {
                 LocalDate now = LocalDate.now();
-                FinancialScoreResult score = financialScoreEngine.computeScore(userId, now.getMonthValue(), now.getYear());
+                FinancialScoreResult score = financialScoreEngine.computeScore(userId, now.getMonthValue(),
+                        now.getYear());
                 String scoreContext = responseGenerator.t(language,
-                        "\n\n📊 Điểm tài chính hiện tại: " + score.getTotalScore() + "/100 (Hạng " + score.getGrade() + ")",
-                        "\n\n📊 Current Financial Score: " + score.getTotalScore() + "/100 (Grade " + score.getGrade() + ")");
+                        "\n\n📊 Điểm tài chính hiện tại: " + score.getTotalScore() + "/100 (Hạng " + score.getGrade()
+                                + ")",
+                        "\n\n📊 Current Financial Score: " + score.getTotalScore() + "/100 (Grade " + score.getGrade()
+                                + ")");
                 reply += scoreContext;
             } catch (Exception e) {
                 log.debug("Could not compute financial score for advice context: {}", e.getMessage());
@@ -650,7 +716,8 @@ public class AiAssistantService {
             return AiAssistantResponse.builder().intent("QUERY")
                     .reply(responseGenerator.t(language,
                             "Cần đăng nhập để xem điểm tài chính.",
-                            "Please log in to see your financial score.")).build();
+                            "Please log in to see your financial score."))
+                    .build();
         }
         LocalDate now = LocalDate.now();
         FinancialScoreResult score = financialScoreEngine.computeScore(userId, now.getMonthValue(), now.getYear());
@@ -685,9 +752,17 @@ public class AiAssistantService {
     // CONTEXTUAL FALLBACK (handles follow-up messages)
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleContextualFallback(ParsedMessage parsed, List<AiMessage> history,
-                                                          AiAssistantRequest request, String language) {
-        // Try to fill slots from conversation context
+    private AiAssistantResponse handleContextualFallback(ParsedMessage parsed, GeminiParseResult gemini,
+            List<AiMessage> history,
+            AiAssistantRequest request, String language) {
+        // 1. If Gemini actually found entries even if intent was UNKNOWN, try
+        // handleInsert
+        if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
+            return handleInsert(parsed.getOriginalText(), parsed, gemini,
+                    request.getAccountId(), request.getUserId(), language);
+        }
+
+        // 2. Try to fill slots from conversation context (text-based)
         List<TransactionSlot> slots = entityExtractor.extractTransactionSlots(parsed);
         slots = contextManager.resolveWithContext(slots,
                 IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), parsed, history);
@@ -699,14 +774,16 @@ public class AiAssistantService {
                     request.getAccountId(), request.getUserId(), language);
         }
 
-        // Ask clarification
+        // 3. Ask clarification if we have partial info
         String clarification = contextManager.detectClarificationNeeded(slots,
                 IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), language);
-        if (clarification != null && slots.stream().anyMatch(s -> s.getNote() != null && !s.getNote().isBlank())) {
+        if (clarification != null && (slots.stream().anyMatch(s -> s.getNote() != null && !s.getNote().isBlank())
+                || parsed.hasAmounts())) {
             return AiAssistantResponse.builder()
                     .intent("INSERT").refreshRequired(false).reply(clarification).build();
         }
 
+        // 4. Ultimate fallback
         return AiAssistantResponse.builder()
                 .intent("UNKNOWN")
                 .reply(responseGenerator.unknownMessage(language))
@@ -718,9 +795,11 @@ public class AiAssistantService {
     // ═════════════════════════════════════════════════════════
 
     private List<FinancialEntry> findTargetEntries(GeminiParsedTarget target) {
-        if (target == null) return List.of();
+        if (target == null)
+            return List.of();
         String normalizedCat = target.categoryName != null
-                ? entityExtractor.normalizeCategoryName(target.categoryName) : null;
+                ? entityExtractor.normalizeCategoryName(target.categoryName)
+                : null;
         LocalDate searchDate = parseDate(target.date, null);
         LocalDate start = searchDate != null ? searchDate : LocalDate.now().minusDays(30);
         LocalDate end = searchDate != null ? searchDate : LocalDate.now();
@@ -729,18 +808,24 @@ public class AiAssistantService {
                 .findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
 
         return entries.stream().filter(e -> {
-            if (target.amount != null && e.getAmount().compareTo(target.amount) != 0) return false;
+            if (target.amount != null && e.getAmount().compareTo(target.amount) != 0)
+                return false;
             if (normalizedCat != null && !normalizedCat.isBlank()) {
                 String catName = categoryService.getIdToNameMap()
                         .getOrDefault(e.getCategoryId(), "").toLowerCase(Locale.ROOT);
                 String normCatName = textPreprocessor.normalizeVietnamese(catName);
                 String normTarget = textPreprocessor.normalizeVietnamese(normalizedCat.toLowerCase(Locale.ROOT));
-                if (!normCatName.contains(normTarget) && !normTarget.contains(normCatName)) return false;
+                if (!normCatName.contains(normTarget) && !normTarget.contains(normCatName))
+                    return false;
             }
             if (target.noteKeywords != null && !target.noteKeywords.isBlank()) {
-                String note = e.getNote() != null ? textPreprocessor.normalizeVietnamese(e.getNote().toLowerCase(Locale.ROOT)) : "";
-                String keywords = cleanKeywords(textPreprocessor.normalizeVietnamese(target.noteKeywords.toLowerCase(Locale.ROOT)));
-                if (!keywords.isBlank() && !note.contains(keywords)) return false;
+                String note = e.getNote() != null
+                        ? textPreprocessor.normalizeVietnamese(e.getNote().toLowerCase(Locale.ROOT))
+                        : "";
+                String keywords = cleanKeywords(
+                        textPreprocessor.normalizeVietnamese(target.noteKeywords.toLowerCase(Locale.ROOT)));
+                if (!keywords.isBlank() && !note.contains(keywords))
+                    return false;
             }
             return true;
         }).collect(Collectors.toList());
@@ -756,7 +841,8 @@ public class AiAssistantService {
                 .findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
 
         return entries.stream().filter(e -> {
-            if (amount != null && e.getAmount().compareTo(amount) != 0) return false;
+            if (amount != null && e.getAmount().compareTo(amount) != 0)
+                return false;
             return true;
         }).collect(Collectors.toList());
     }
@@ -788,9 +874,11 @@ public class AiAssistantService {
             GeminiParsedEntry entry = new GeminiParsedEntry();
             entry.amount = textPreprocessor.extractSingleAmount(parts[1]);
             String notePart = parts[1].replaceAll("[0-9.,dđkK]+", " ").trim();
-            if (notePart.length() > 2) entry.note = parts[1].trim();
+            if (notePart.length() > 2)
+                entry.note = parts[1].trim();
             String catMatch = entityExtractor.inferCategory(textPreprocessor.normalizeVietnamese(parts[1]));
-            if (catMatch != null) entry.categoryName = catMatch;
+            if (catMatch != null)
+                entry.categoryName = catMatch;
             return entry;
         }
         return null;
@@ -798,7 +886,9 @@ public class AiAssistantService {
 
     private String cleanKeywords(String keywords) {
         return keywords
-                .replaceAll("\\b(sua|doi|cap nhat|thanh|sang|thay|den|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi|update|change|edit|set|delete|remove|transaction|entry|this|that|all|everything|today|yesterday|day|month|year|wallet|money|expense|income|spend|spent|buy|payment|pay|recent|nap|nap tien|gui|rut|banking|transfer)\\b", "")
+                .replaceAll(
+                        "\\b(sua|doi|cap nhat|thanh|sang|thay|den|xoa|huy|bo|giup|giao dich|khoan|cai|nay|tat ca|het|hom nay|hom qua|ngay|thang|nam|vi|momo|tien|chi|tieu|vua|nay|chieu|sang|toi|update|change|edit|set|delete|remove|transaction|entry|this|that|all|everything|today|yesterday|day|month|year|wallet|money|expense|income|spend|spent|buy|payment|pay|recent|nap|nap tien|gui|rut|banking|transfer)\\b",
+                        "")
                 .replaceAll("[0-9.,dđkK]+", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
@@ -808,18 +898,22 @@ public class AiAssistantService {
         List<Account> accounts = (userId != null)
                 ? accountRepository.findByUserIdOrderByNameAsc(userId)
                 : accountRepository.findAll();
-        if (accounts.isEmpty()) return AccountResolution.none();
+        if (accounts.isEmpty())
+            return AccountResolution.none();
         if (forcedAccountId != null) {
             boolean exists = accounts.stream().anyMatch(a -> Objects.equals(a.getId(), forcedAccountId));
-            if (exists) return AccountResolution.selected(forcedAccountId);
+            if (exists)
+                return AccountResolution.selected(forcedAccountId);
             return AccountResolution.error(responseGenerator.t(language,
                     "Ví/tài khoản không tồn tại.", "Wallet/account does not exist."));
         }
-        if (accounts.size() == 1) return AccountResolution.selected(accounts.get(0).getId());
+        if (accounts.size() == 1)
+            return AccountResolution.selected(accounts.get(0).getId());
         // Try to match account name in message
         if (message != null && !message.isBlank()) {
             String normMsg = textPreprocessor.normalizeVietnamese(message);
-            Long bestId = null; int bestLen = 0;
+            Long bestId = null;
+            int bestLen = 0;
             for (Account a : accounts) {
                 String name = a.getName() == null ? "" : a.getName();
                 String normName = textPreprocessor.normalizeVietnamese(name);
@@ -828,7 +922,8 @@ public class AiAssistantService {
                     bestId = a.getId();
                 }
             }
-            if (bestId != null) return AccountResolution.selected(bestId);
+            if (bestId != null)
+                return AccountResolution.selected(bestId);
         }
         return AccountResolution.needsSelection();
     }
@@ -845,9 +940,11 @@ public class AiAssistantService {
     }
 
     private Long resolveCategoryId(Map<String, Long> nameToId, String name, Long fallback) {
-        if (name == null || name.isBlank()) return fallback;
+        if (name == null || name.isBlank())
+            return fallback;
         Long id = nameToId.get(name.trim().toLowerCase(Locale.ROOT));
-        if (id != null) return id;
+        if (id != null)
+            return id;
         String normTarget = textPreprocessor.normalizeVietnamese(name.trim().toLowerCase(Locale.ROOT));
         for (var entry : nameToId.entrySet()) {
             if (textPreprocessor.normalizeVietnamese(entry.getKey()).equals(normTarget))
@@ -862,77 +959,125 @@ public class AiAssistantService {
     }
 
     private static LocalDate parseDate(String date, LocalDate fallback) {
-        if (date == null || date.isBlank()) return fallback;
-        try { return LocalDate.parse(date.trim(), DATE_FMT); }
-        catch (Exception e) { return fallback; }
+        if (date == null || date.isBlank())
+            return fallback;
+        try {
+            return LocalDate.parse(date.trim(), DATE_FMT);
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private AiAssistantResponse finalizeResponse(AiAssistantResponse response, String conversationId,
-                                                  String message, String base64Image, Long userId) {
+            String message, String base64Image, Long userId) {
         response.setConversationId(conversationId);
         boolean hasImage = base64Image != null && !base64Image.isBlank();
         if ((message != null && !message.isBlank()) || hasImage) {
-            String safeContent = (message == null || message.isBlank()) ? "[Gửi ảnh hóa đơn]" : message.trim();
-            saveMessage(conversationId, "USER", safeContent, userId);
+            String safeContent = (message == null || message.isBlank()) ? "[Hóa đơn]" : message.trim();
+            String imageUrl = hasImage ? saveBase64Image(base64Image) : null;
+            saveMessage(conversationId, "USER", safeContent, imageUrl, userId);
             if (response.getReply() != null) {
-                saveMessage(conversationId, "ASSISTANT", response.getReply(), userId);
+                saveMessage(conversationId, "ASSISTANT", response.getReply(), null, userId);
             }
         }
         return response;
     }
 
     public List<AiMessage> getHistory(Long userId) {
-        if (userId == null) return List.of();
+        if (userId == null)
+            return List.of();
         // Load only the latest 50 messages to avoid large payloads
         List<AiMessage> all = aiMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
-        if (all.size() > 50) return all.subList(all.size() - 50, all.size());
+        if (all.size() > 50)
+            return all.subList(all.size() - 50, all.size());
         return all;
     }
 
-    private void saveMessage(String conversationId, String role, String content, Long userId) {
+    private void saveMessage(String conversationId, String role, String content, String imageUrl, Long userId) {
         String safe = content == null ? "" : content.trim();
-        if (safe.length() > 4000) safe = safe.substring(0, 3997) + "...";
+        if (safe.length() > 4000)
+            safe = safe.substring(0, 3997) + "...";
         aiMessageRepository.save(AiMessage.builder()
                 .conversationId(conversationId)
                 .userId(userId)
                 .role(role)
                 .content(safe)
+                .imageUrl(imageUrl)
                 .build());
+    }
+
+    private String saveBase64Image(String base64Data) {
+        if (base64Data == null || base64Data.isBlank())
+            return null;
+        try {
+            // Remove prefix if present (e.g., "data:image/png;base64,")
+            String base64Part = base64Data;
+            String extension = ".png"; // Default
+            if (base64Data.contains(",")) {
+                String header = base64Data.substring(0, base64Data.indexOf(","));
+                base64Part = base64Data.substring(base64Data.indexOf(",") + 1);
+                if (header.contains("image/jpeg"))
+                    extension = ".jpg";
+                else if (header.contains("image/gif"))
+                    extension = ".gif";
+                else if (header.contains("image/webp"))
+                    extension = ".webp";
+            }
+
+            byte[] imageBytes = Base64.getDecoder().decode(base64Part);
+            String dir = "uploads/";
+            java.io.File d = new java.io.File(dir);
+            if (!d.exists())
+                d.mkdirs();
+
+            String filename = UUID.randomUUID().toString() + extension;
+            Path path = Paths.get(dir + filename);
+            Files.write(path, imageBytes);
+
+            return "/" + dir + filename;
+        } catch (Exception e) {
+            log.error("Failed to save AI assistant image: {}", e.getMessage());
+            return null;
+        }
     }
 
     // ═════════════════════════════════════════════════════════
     // BUDGET SETTER
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleSetBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
+    private AiAssistantResponse handleSetBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
+            String language) {
         if (userId == null) {
             return AiAssistantResponse.builder().intent("ADVICE")
-                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt ngân sách.", "Please log in to set a budget.")).build();
+                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt ngân sách.",
+                            "Please log in to set a budget."))
+                    .build();
         }
 
         GeminiParsedEntry data = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
-                ? gemini.entries.get(0) : null;
-        
+                ? gemini.entries.get(0)
+                : null;
+
         if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
             String reply = responseGenerator.t(language,
-                            "Bạn muốn đặt ngân sách bao nhiêu? (Ví dụ: Ngân sách ăn uống 5 triệu)",
-                            "How much budget do you want to set? (e.g., Set food budget to 5M)");
+                    "Bạn muốn đặt ngân sách bao nhiêu? (Ví dụ: Ngân sách ăn uống 5 triệu)",
+                    "How much budget do you want to set? (e.g., Set food budget to 5M)");
             reply += getCategoryListResponse(EntryType.EXPENSE, language);
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
 
-        String normCat = entityExtractor.normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        String normCat = entityExtractor
+                .normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
         Map<String, Long> nameToId = getNameToIdMap();
         Long catId = resolveCategoryId(nameToId, normCat, null);
 
         if (catId == null) {
             String reply = responseGenerator.t(language,
-                            "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục chi tiêu sau nhé:",
-                            "I couldn't find this category. Please choose one of the following expense categories:",
-                            "このカテゴリーが見つかりませんでした。以下の支出カテゴリーから選択してください：",
-                            "이 카테고리를 찾을 수 없습니다. 다음 지출 카테고리 중에서 선택하십시오:",
-                            "找不到该类别。请从以下支出类别中选择："
-            );
+                    "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục chi tiêu sau nhé:",
+                    "I couldn't find this category. Please choose one of the following expense categories:",
+                    "このカテゴリーが見つかりませんでした。以下の支出カテゴリーから選択してください：",
+                    "이 카테고리를 찾을 수 없습니다. 다음 지출 카테고리 중에서 선택하십시오:",
+                    "找不到该类别。请从以下支出类别中选择：");
             reply += getCategoryListResponse(EntryType.EXPENSE, language);
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
@@ -945,24 +1090,26 @@ public class AiAssistantService {
             return AiAssistantResponse.builder().intent("ADVICE")
                     .reply(responseGenerator.t(language,
                             "Danh mục này thuộc loại THU. Bạn hãy dùng \"Mục tiêu [tên danh mục] [số tiền]\" để đặt mục tiêu thu nhập.",
-                            "This category is an INCOME type. Use \"Target [category] [amount]\" to set an income target instead.")).build();
+                            "This category is an INCOME type. Use \"Target [category] [amount]\" to set an income target instead."))
+                    .build();
         }
 
         // Determine dates (default to current month, unless Gemini extracted a date)
         LocalDate today = LocalDate.now();
         LocalDate start = today.withDayOfMonth(1);
         if (data.date != null) {
-             LocalDate parsedDate = parseDate(data.date, today);
-             if (parsedDate.isAfter(today)) {
-                 start = parsedDate.withDayOfMonth(1);
-             }
+            LocalDate parsedDate = parseDate(data.date, today);
+            if (parsedDate.isAfter(today)) {
+                start = parsedDate.withDayOfMonth(1);
+            }
         }
         LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
 
         // Upsert budget
-        Optional<Budget> existing = budgetRepository.findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-                userId, catId, start, end);
-        
+        Optional<Budget> existing = budgetRepository
+                .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                        userId, catId, start, end);
+
         Budget budget = existing.orElse(new Budget());
         budget.setUserId(userId);
         budget.setCategoryId(catId);
@@ -974,9 +1121,11 @@ public class AiAssistantService {
         String catName = categoryService.getIdToNameMap().get(catId);
         String reply = responseGenerator.t(language,
                 String.format("Vâng, mình đã ghi nhận hạn mức ngân sách cho danh mục **%s** là **%s** cho tháng %d/%d.",
-                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(), start.getYear()),
+                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(),
+                        start.getYear()),
                 String.format("Okay, I've set a **%s** budget for **%s** for month %d/%d.",
-                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(), start.getYear()));
+                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(),
+                        start.getYear()));
 
         return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
     }
@@ -985,24 +1134,29 @@ public class AiAssistantService {
     // INCOME TARGET SETTER
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleSetIncomeTarget(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
+    private AiAssistantResponse handleSetIncomeTarget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
+            String language) {
         if (userId == null) {
             return AiAssistantResponse.builder().intent("ADVICE")
-                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt mục tiêu thu nhập.", "Please log in to set an income target.")).build();
+                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt mục tiêu thu nhập.",
+                            "Please log in to set an income target."))
+                    .build();
         }
 
         GeminiParsedEntry data = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
-                ? gemini.entries.get(0) : null;
+                ? gemini.entries.get(0)
+                : null;
 
         if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
             String reply = responseGenerator.t(language,
-                            "Bạn muốn đặt mục tiêu thu bao nhiêu? (Ví dụ: Mục tiêu lương 20 triệu)",
-                            "What income target do you want to set? (e.g., Set salary target to 20M)");
+                    "Bạn muốn đặt mục tiêu thu bao nhiêu? (Ví dụ: Mục tiêu lương 20 triệu)",
+                    "What income target do you want to set? (e.g., Set salary target to 20M)");
             reply += getCategoryListResponse(EntryType.INCOME, language);
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
 
-        String normCat = entityExtractor.normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        String normCat = entityExtractor
+                .normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
         Map<String, Long> nameToId = getNameToIdMap();
         Long catId = resolveCategoryId(nameToId, normCat, null);
 
@@ -1025,7 +1179,8 @@ public class AiAssistantService {
             return AiAssistantResponse.builder().intent("ADVICE")
                     .reply(responseGenerator.t(language,
                             "Danh mục này thuộc loại CHI. Bạn hãy dùng \"Hạn mức [tên danh mục] [số tiền]\" để đặt ngân sách chi.",
-                            "This category is an EXPENSE type. Use \"Budget [category] [amount]\" to set an expense budget instead.")).build();
+                            "This category is an EXPENSE type. Use \"Budget [category] [amount]\" to set an expense budget instead."))
+                    .build();
         }
 
         // Determine dates (default to current month)
@@ -1040,8 +1195,9 @@ public class AiAssistantService {
         LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
 
         // Upsert budget (income target)
-        Optional<Budget> existing = budgetRepository.findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-                userId, catId, start, end);
+        Optional<Budget> existing = budgetRepository
+                .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                        userId, catId, start, end);
 
         Budget budget = existing.orElse(new Budget());
         budget.setUserId(userId);
@@ -1054,20 +1210,25 @@ public class AiAssistantService {
         String catName = categoryService.getIdToNameMap().get(catId);
         String reply = responseGenerator.t(language,
                 String.format("Vâng, mình đã ghi nhận mục tiêu thu nhập cho danh mục **%s** là **%s** cho tháng %d/%d.",
-                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(), start.getYear()),
+                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(),
+                        start.getYear()),
                 String.format("Okay, I've set a **%s** income target for **%s** for month %d/%d.",
-                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(), start.getYear()));
+                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(),
+                        start.getYear()));
 
         return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
     }
 
     private String getCategoryListResponse(EntryType type, String language) {
         List<Category> cats = categoryRepository.findByTypeOrderByNameAsc(type);
-        if (cats.isEmpty()) return "";
+        if (cats.isEmpty())
+            return "";
         StringBuilder sb = new StringBuilder("\n\n");
-        sb.append(type == EntryType.INCOME 
-            ? responseGenerator.t(language, "📌 Danh mục thu nhập:", "📌 Income categories:", "📌 収入カテゴリー:", "📌 수입 카테고리:", "📌 收入类别:")
-            : responseGenerator.t(language, "📌 Danh mục chi tiêu:", "📌 Expense categories:", "📌 支出カテゴリー:", "📌 지출 카테고리:", "📌 支出类别:"));
+        sb.append(type == EntryType.INCOME
+                ? responseGenerator.t(language, "📌 Danh mục thu nhập:", "📌 Income categories:", "📌 収入カテゴリー:",
+                        "📌 수입 카테고리:", "📌 收入类别:")
+                : responseGenerator.t(language, "📌 Danh mục chi tiêu:", "📌 Expense categories:", "📌 支出カテゴリー:",
+                        "📌 지출 카테고리:", "📌 支出类别:"));
         sb.append("\n");
         for (Category c : cats) {
             sb.append("- ").append(c.getName()).append("\n");
@@ -1080,12 +1241,27 @@ public class AiAssistantService {
         final Long accountId;
         final boolean needsSelection;
         final String errorMessage;
+
         private AccountResolution(Long accountId, boolean needsSelection, String errorMessage) {
-            this.accountId = accountId; this.needsSelection = needsSelection; this.errorMessage = errorMessage;
+            this.accountId = accountId;
+            this.needsSelection = needsSelection;
+            this.errorMessage = errorMessage;
         }
-        static AccountResolution selected(Long accountId) { return new AccountResolution(accountId, false, null); }
-        static AccountResolution needsSelection() { return new AccountResolution(null, true, null); }
-        static AccountResolution none() { return new AccountResolution(null, false, null); }
-        static AccountResolution error(String msg) { return new AccountResolution(null, false, msg); }
+
+        static AccountResolution selected(Long accountId) {
+            return new AccountResolution(accountId, false, null);
+        }
+
+        static AccountResolution needsSelection() {
+            return new AccountResolution(null, true, null);
+        }
+
+        static AccountResolution none() {
+            return new AccountResolution(null, false, null);
+        }
+
+        static AccountResolution error(String msg) {
+            return new AccountResolution(null, false, msg);
+        }
     }
 }

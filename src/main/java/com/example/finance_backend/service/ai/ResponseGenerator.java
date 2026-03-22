@@ -97,6 +97,30 @@ public class ResponseGenerator {
                 "I couldn't create the transaction. Please include a clear amount and description.");
     }
 
+    public String draftMessage(java.util.List<GeminiClientWrapper.GeminiParsedEntry> entries, String language) {
+        if (entries == null || entries.isEmpty()) return insertEmpty(language);
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append(t(language, 
+            "Mình đã tìm thấy thông tin giao dịch sau từ nội dung bạn gửi.\n\n", 
+            "I found the following transaction information from what you sent.\n\n"));
+        
+        for (var entry : entries) {
+            String catName = entry.categoryName != null ? entry.categoryName : "Khác";
+            String note = entry.note != null ? entry.note : "";
+            String type = "INCOME".equalsIgnoreCase(entry.type) ? "+" : "-";
+            sb.append(String.format("%s %s • %s", type, formatVnd(entry.amount, language), catName));
+            if (!note.isBlank()) sb.append(" (").append(trimNote(note)).append(")");
+            sb.append("\n");
+        }
+        
+        sb.append(t(language, 
+            "\nBạn hãy kiểm tra lại nhé. Bạn có thể yêu cầu mình thay đổi bất kỳ thông tin nào trước khi lưu.\n\nBạn có muốn lưu giao dịch này không?", 
+            "\nPlease review it. You can ask me to modify anything before saving.\n\nDo you want to save this transaction?"));
+        
+        return sb.toString();
+    }
+
     // ═════════════════════════════════════════════════════════
     // QUERY RESPONSES
     // ═════════════════════════════════════════════════════════
