@@ -60,9 +60,17 @@ public class EmailService {
             Response response = sg.api(request);
             System.out.println("SendGrid Status: " + response.getStatusCode());
             System.out.println("SendGrid Body: " + response.getBody());
+            
+            if (response.getStatusCode() < 200 || response.getStatusCode() >= 300) {
+                String errorMsg = String.format("SendGrid gửi mail thất bại. Status: %d, Body: %s", 
+                        response.getStatusCode(), response.getBody());
+                System.err.println(errorMsg);
+                throw new RuntimeException(errorMsg);
+            }
         } catch (IOException ex) {
-            System.err.println("Lỗi gửi mail: " + ex.getMessage());
-            throw new RuntimeException("Lỗi khi gửi email xác nhận: " + ex.getMessage(), ex);
+            String errorMsg = "Lỗi kết nối SendGrid: " + ex.getMessage();
+            System.err.println(errorMsg);
+            throw new RuntimeException(errorMsg, ex);
         }
     }
 }

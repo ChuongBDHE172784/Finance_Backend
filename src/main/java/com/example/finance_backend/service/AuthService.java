@@ -42,7 +42,11 @@ public class AuthService {
         }
 
         if (!user.isEnabled()) {
-            resendVerificationCode(user.getEmail());
+            try {
+                resendVerificationCode(user.getEmail());
+            } catch (Exception e) {
+                System.err.println("Không thể gửi lại mã xác minh trong quá trình đăng nhập: " + e.getMessage());
+            }
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tài khoản chưa được kích hoạt. Mã xác minh mới đã được gửi vào email của bạn.");
         }
 
