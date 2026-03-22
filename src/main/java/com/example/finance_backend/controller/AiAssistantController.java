@@ -32,4 +32,11 @@ public class AiAssistantController {
             @RequestHeader(value = "X-User-Id") Long userId) {
         return ResponseEntity.ok(aiAssistantService.getHistory(userId));
     }
+
+    @DeleteMapping("/history")
+    public ResponseEntity<Void> deleteHistory(
+            @RequestHeader(value = "X-User-Id") Long userId) {
+        aiAssistantService.clearHistory(userId);
+        return ResponseEntity.noContent().build();
+    }
 }

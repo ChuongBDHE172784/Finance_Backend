@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.file.Files;
@@ -991,6 +992,13 @@ public class AiAssistantService {
         if (all.size() > 50)
             return all.subList(all.size() - 50, all.size());
         return all;
+    }
+
+    @Transactional
+    public void clearHistory(Long userId) {
+        if (userId == null)
+            return;
+        aiMessageRepository.deleteByUserId(userId);
     }
 
     private void saveMessage(String conversationId, String role, String content, String imageUrl, Long userId) {
