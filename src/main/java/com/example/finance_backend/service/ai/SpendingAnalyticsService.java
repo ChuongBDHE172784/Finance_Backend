@@ -1,9 +1,11 @@
 package com.example.finance_backend.service.ai;
 
 import com.example.finance_backend.entity.Budget;
+import com.example.finance_backend.entity.Category;
 import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.repository.BudgetRepository;
+import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.CategoryService;
 import lombok.*;
@@ -29,13 +31,16 @@ public class SpendingAnalyticsService {
     private final FinancialEntryRepository entryRepository;
     private final CategoryService categoryService;
     private final BudgetRepository budgetRepository;
+    private final CategoryRepository categoryRepository;
 
     public SpendingAnalyticsService(FinancialEntryRepository entryRepository,
                                      CategoryService categoryService,
-                                     BudgetRepository budgetRepository) {
+                                     BudgetRepository budgetRepository,
+                                     CategoryRepository categoryRepository) {
         this.entryRepository = entryRepository;
         this.categoryService = categoryService;
         this.budgetRepository = budgetRepository;
+        this.categoryRepository = categoryRepository;
     }
 
     // ═════════════════════════════════════════════════════════
@@ -185,23 +190,47 @@ public class SpendingAnalyticsService {
         if (budgetOpt.isEmpty()) return null;
 
         Budget budget = budgetOpt.get();
-        // Scope to this category
+        String categoryName = categoryService.getIdToNameMap().getOrDefault(categoryId, "Khác");
+
+        // Determine category type to branch logic
+        EntryType categoryType = categoryRepository.findById(categoryId)
+                .map(Category::getType)
+                .orElse(EntryType.EXPENSE);
+
         List<FinancialEntry> entries = entryRepository
                 .findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end);
-        BigDecimal categorySpent = entries.stream()
-                .filter(e -> e.getType() == EntryType.EXPENSE && Objects.equals(e.getCategoryId(), categoryId))
-                .map(FinancialEntry::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal percentUsed = budget.getAmount().compareTo(BigDecimal.ZERO) > 0
-                ? categorySpent.multiply(new BigDecimal("100")).divide(budget.getAmount(), 1, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-        boolean isOver = categorySpent.compareTo(budget.getAmount()) > 0;
-        BigDecimal overAmount = isOver ? categorySpent.subtract(budget.getAmount()) : BigDecimal.ZERO;
+        if (categoryType == EntryType.INCOME) {
+            // INCOME TARGET: calculate earned vs target
+            BigDecimal earned = entries.stream()
+                    .filter(e -> e.getType() == EntryType.INCOME && Objects.equals(e.getCategoryId(), categoryId))
+                    .map(FinancialEntry::getAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        String categoryName = categoryService.getIdToNameMap().getOrDefault(categoryId, "Khác");
-        return new BudgetStatusResult(categoryName, budget.getAmount(), categorySpent,
-                percentUsed, isOver, overAmount);
+            BigDecimal percentUsed = budget.getAmount().compareTo(BigDecimal.ZERO) > 0
+                    ? earned.multiply(new BigDecimal("100")).divide(budget.getAmount(), 1, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            boolean achieved = earned.compareTo(budget.getAmount()) >= 0;
+            BigDecimal overAmount = achieved ? earned.subtract(budget.getAmount()) : BigDecimal.ZERO;
+
+            return new BudgetStatusResult(categoryName, budget.getAmount(), earned,
+                    percentUsed, achieved, overAmount, "INCOME_TARGET");
+        } else {
+            // EXPENSE BUDGET: calculate spent vs limit (existing logic)
+            BigDecimal categorySpent = entries.stream()
+                    .filter(e -> e.getType() == EntryType.EXPENSE && Objects.equals(e.getCategoryId(), categoryId))
+                    .map(FinancialEntry::getAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal percentUsed = budget.getAmount().compareTo(BigDecimal.ZERO) > 0
+                    ? categorySpent.multiply(new BigDecimal("100")).divide(budget.getAmount(), 1, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            boolean isOver = categorySpent.compareTo(budget.getAmount()) > 0;
+            BigDecimal overAmount = isOver ? categorySpent.subtract(budget.getAmount()) : BigDecimal.ZERO;
+
+            return new BudgetStatusResult(categoryName, budget.getAmount(), categorySpent,
+                    percentUsed, isOver, overAmount, "EXPENSE_BUDGET");
+        }
     }
 
     /**
@@ -507,6 +536,8 @@ public class SpendingAnalyticsService {
         private final BigDecimal percentUsed;
         private final boolean overBudget;
         private final BigDecimal overAmount;
+        /** "EXPENSE_BUDGET" or "INCOME_TARGET" */
+        private final String planType;
     }
 
     @Getter

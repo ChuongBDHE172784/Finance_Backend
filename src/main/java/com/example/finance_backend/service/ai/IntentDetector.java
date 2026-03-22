@@ -49,6 +49,12 @@ public class IntentDetector {
             "ngan sach", "budget", "han muc", "da dung", "con lai",
             "vuot ngan sach", "over budget", "within budget");
 
+    // ── INCOME TARGET keywords ──
+    private static final List<String> INCOME_TARGET_KW = List.of(
+            "muc tieu thu", "muc tieu", "income target", "income goal",
+            "target income", "goal income", "dat muc tieu",
+            "tien do thu", "revenue target", "revenue goal");
+
     // ── FINANCIAL SCORE keywords ──
     private static final List<String> SCORE_KW = List.of(
             "diem", "score", "cham diem", "danh gia", "xep hang",
@@ -106,7 +112,24 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 4: Check BUDGET
+        // Phase 4: Check INCOME TARGET (before BUDGET to avoid conflict)
+        if (matchesKeywords(normalized, INCOME_TARGET_KW)) {
+            // If it also has an amount, it's a SET intent
+            if (hasAmount) {
+                return IntentResult.builder()
+                        .intent(Intent.SET_INCOME_TARGET)
+                        .confidence(0.9)
+                        .source(Source.RULE)
+                        .build();
+            }
+            return IntentResult.builder()
+                    .intent(Intent.BUDGET_QUERY)
+                    .confidence(0.85)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 5: Check BUDGET
         if (matchesKeywords(normalized, BUDGET_KW)) {
             return IntentResult.builder()
                     .intent(Intent.BUDGET_QUERY)

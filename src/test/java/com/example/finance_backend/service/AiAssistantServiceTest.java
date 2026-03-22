@@ -2,14 +2,19 @@ package com.example.finance_backend.service;
 
 import com.example.finance_backend.dto.AiAssistantRequest;
 import com.example.finance_backend.dto.AiAssistantResponse;
-import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
 import com.example.finance_backend.repository.BudgetRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
-import com.example.finance_backend.service.ai.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.finance_backend.service.ai.ConversationContextManager;
+import com.example.finance_backend.service.ai.EntityExtractor;
+import com.example.finance_backend.service.ai.FinancialScoreEngine;
+import com.example.finance_backend.service.ai.GeminiClientWrapper;
+import com.example.finance_backend.service.ai.IntentDetector;
+import com.example.finance_backend.service.ai.ResponseGenerator;
+import com.example.finance_backend.service.ai.SpendingAnalyticsService;
+import com.example.finance_backend.service.ai.TextPreprocessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +36,7 @@ public class AiAssistantServiceTest {
     @Mock private AiMessageRepository aiMessageRepository;
     @Mock private CategoryService categoryService;
     @Mock private BudgetRepository budgetRepository;
+    @Mock private com.example.finance_backend.repository.CategoryRepository categoryRepository;
 
     private AiAssistantService aiAssistantService;
 
@@ -42,7 +48,7 @@ public class AiAssistantServiceTest {
         ConversationContextManager contextManager = new ConversationContextManager(textPreprocessor, entityExtractor);
         GeminiClientWrapper geminiClient = mock(GeminiClientWrapper.class);
         ResponseGenerator responseGenerator = new ResponseGenerator();
-        SpendingAnalyticsService analyticsService = new SpendingAnalyticsService(entryRepository, categoryService, budgetRepository);
+        SpendingAnalyticsService analyticsService = new SpendingAnalyticsService(entryRepository, categoryService, budgetRepository, categoryRepository);
         FinancialScoreEngine scoreEngine = new FinancialScoreEngine(entryRepository, budgetRepository, analyticsService);
 
         aiAssistantService = new AiAssistantService(
@@ -50,7 +56,7 @@ public class AiAssistantServiceTest {
                 contextManager, geminiClient, responseGenerator, analyticsService,
                 scoreEngine,
                 entryService, entryRepository, accountRepository,
-                aiMessageRepository, categoryService, budgetRepository);
+                aiMessageRepository, categoryService, budgetRepository, categoryRepository);
     }
 
     @Test

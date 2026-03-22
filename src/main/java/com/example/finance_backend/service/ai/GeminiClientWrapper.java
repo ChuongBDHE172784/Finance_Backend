@@ -55,7 +55,13 @@ public class GeminiClientWrapper {
     public GeminiParseResult parse(String message, String base64Image,
                                     List<AiMessage> history, String language) {
         try {
-            String prompt = buildPrompt(message, history, language);
+            LocalDate today = LocalDate.now();
+            String categoriesStr = categoryService.findAll().stream()
+                    .map(c -> c.getName())
+                    .collect(Collectors.joining(", "));
+            String historyBlock = formatHistory(history, language);
+            
+            String prompt = buildPrompt(language, today, categoriesStr, historyBlock, message);
             GenerateContentResponse response;
 
             if (base64Image != null && !base64Image.isBlank()) {
@@ -81,120 +87,49 @@ public class GeminiClientWrapper {
     // PROMPT CONSTRUCTION
     // ═════════════════════════════════════════════════════════
 
-    private String buildPrompt(String message, List<AiMessage> history, String language) {
-        String safeMessage = message == null ? "" : message.trim();
-        LocalDate today = LocalDate.now();
-        String categoriesStr = categoryService.findAll().stream()
-                .map(c -> c.getName())
-                .collect(Collectors.joining(", "));
-        String historyBlock = formatHistory(history, language);
+    /**
+     * Builds a localized prompt for Gemini.
+     */
+    public String buildPrompt(String language, LocalDate today, String categories, String history, String message) {
+        String langName = switch (language) {
+            case "en" -> "English";
+            case "ja" -> "Japanese";
+            case "ko" -> "Korean";
+            case "zh" -> "Chinese";
+            default -> "Vietnamese";
+        };
 
-        if ("en".equals(language)) {
-            return buildEnglishPrompt(today, categoriesStr, historyBlock, safeMessage);
-        }
-        return buildVietnamesePrompt(today, categoriesStr, historyBlock, safeMessage);
-    }
+        String adviceInstr = switch (language) {
+            case "en" -> "If the intent is ADVICE, provide a helpful and professional response in English.";
+            case "ja" -> "意図がADVICEの場合、日本語で丁寧かつ専門的な回答を提供してください。";
+            case "ko" -> "의도가 ADVICE인 경우, 한국어로 친절하고 전문적인 답변을 제공하십시오。";
+            case "zh" -> "如果意图是 ADVICE，请用中文提供友好且专业的回答。";
+            default -> "Nếu intent là ADVICE, hãy trả lời bằng tiếng Việt một cách hữu ích và chuyên nghiệp.";
+        };
 
-    private String buildEnglishPrompt(LocalDate today, String categories, String history, String message) {
         return """
-                You are an AI assistant for a personal finance app. Analyze the user's intent and extract data.
+                You are an AI Assistant for a Finance Management App. Analyze intent and extract data.
+                Always respond in %s.
                 Today is %s (Asia/Ho_Chi_Minh).
                 Valid categories: %s.
-                Conversation history (chronological, role USER/ASSISTANT):
+                Conversation history:
                 %s
 
                 OUTPUT REQUIREMENTS:
-                - Return raw JSON only, no markdown or extra text.
-                - Always use YYYY-MM-DD date format.
-                - Determine intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), SET_BUDGET (set a target budget limit).
-                - For SET_BUDGET, use entries[0] to specify categoryName and amount.
-                - If ADVICE, fill "adviceReply" with an English answer.
-                - For UPDATE/DELETE, use "target" to identify the transaction (amount, date, old category). Use "entries[0]" for new values (if UPDATE).
-                - If the user wants to delete all transactions in a time range/condition, set "target.deleteAll = true".
-                - If the user uses English category names, map them to the closest category from the list above and output that category name exactly.
-                - If a receipt/invoice image is provided, perform OCR and summarize all findings (date, items, total). Ask the user if they want to add these transactions. Set intent to ADVICE and provide the summary in "adviceReply".
-                - If the user asks to CORRECT or CHANGE any detail of the receipt they just sent (before saving), do NOT use intent UPDATE. Instead, update your summary and ask if it's correct now. Stay in intent ADVICE.
-                - ONLY use intent UPDATE when the user wants to change a transaction that was ALREADY saved to the database in the past.
-                - Do NOT use intent INSERT directly from an image unless the user specifically says "Add this" or "Save this".
+                - Return ONLY pure JSON, no markdown, no extra explanation.
+                - Use YYYY-MM-DD date format.
+                - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), SET_BUDGET (set an expense budget limit), SET_INCOME_TARGET (set an income target/goal).
+                - For SET_BUDGET: use entries[0] for categoryName and limit amount. Category MUST be EXPENSE type.
+                - For SET_INCOME_TARGET: use entries[0] for categoryName and target amount. Category MUST be INCOME type.
+                - IMPORTANT: "Budget" / "Expense Limit" = SET_BUDGET. "Goal" / "Income Target" = SET_INCOME_TARGET.
+                - If the user says "set a target" or "set a budget" without amount/category, still select the corresponding intent and leave fields empty. DO NOT select ADVICE for these cases.
+                - DO NOT fill "adviceReply" if intent is SET_BUDGET or SET_INCOME_TARGET.
+                - %s
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "SET_INCOME_TARGET" | "UNKNOWN",
                   "adviceReply": "string (only for ADVICE)",
-                  "query": {
-                    "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE" | "BUDGET" | "MONTHLY_SUMMARY" | "FINANCIAL_HEALTH" | "WEEKLY_PATTERN" | "SMART_SUGGESTION" | "FINANCIAL_SCORE",
-                    "type": "EXPENSE" | "INCOME" | "ALL",
-                    "startDate": "YYYY-MM-DD",
-                    "endDate": "YYYY-MM-DD",
-                    "limit": 10,
-                    "categoryName": "string"
-                  },
-                  "target": {
-                    "amount": 45000,
-                    "categoryName": "Ăn uống",
-                    "date": "YYYY-MM-DD",
-                    "noteKeywords": "pho",
-                    "deleteAll": false
-                  },
-                  "entries": [
-                    {
-                      "amount": 45000,
-                      "categoryName": "Ăn uống",
-                      "note": "Pho",
-                      "type": "EXPENSE",
-                      "date": "YYYY-MM-DD"
-                    }
-                  ]
-                }
-
-                SET_BUDGET EXAMPLE:
-                - "Set budget for food 5M": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
-                - "Eat phở 5M": intent=INSERT (because it's an action, not a goal)
-
-                ADVANCED QUERY EXAMPLES:
-                - "Average daily spending this month": metric=AVERAGE
-                - "Did my spending increase compared to last month": metric=TREND
-                - "Spending by category percentage": metric=PERCENTAGE
-                - "How's my budget?": metric=BUDGET
-                - "Monthly summary": metric=MONTHLY_SUMMARY
-                - "My financial health": metric=FINANCIAL_HEALTH
-                - "Do I spend more on weekends?": metric=WEEKLY_PATTERN
-                - "Any saving suggestions?": metric=SMART_SUGGESTION
-                - "What's my financial score?": metric=FINANCIAL_SCORE
-
-                ADVICE EXAMPLE:
-                - "How can I save money?": intent=ADVICE, adviceReply="To save money, you should..."
-
-                INPUT:
-                %s
-                """.formatted(today.format(DATE_FMT), categories, history, message);
-    }
-
-    private String buildVietnamesePrompt(LocalDate today, String categories, String history, String message) {
-        return """
-                Bạn là trợ lý AI cho ứng dụng quản lý chi tiêu. Hãy phân tích ý định và trích xuất dữ liệu.
-                Hôm nay là %s (Asia/Ho_Chi_Minh).
-                Danh sách danh mục hợp lệ: %s.
-                Lịch sử hội thoại (theo thời gian, vai trò USER/ASSISTANT):
-                %s
-
-                YÊU CẦU ĐẦU RA:
-                - Chỉ trả về JSON thuần, không markdown, không giải thích thêm.
-                - Luôn dùng định dạng ngày YYYY-MM-DD.
-                - Xác định intent: INSERT (thêm giao dịch), QUERY (tra cứu), UPDATE (sửa), DELETE (xóa), ADVICE (tư vấn/hỏi đáp chung), SET_BUDGET (đặt hạn mức ngân sách).
-                - Với SET_BUDGET, dùng entries[0] để chỉ định categoryName và số tiền hạn mức.
-                - Nếu là ADVICE, hãy điền câu trả lời vào trường "adviceReply".
-                - Khi UPDATE/DELETE, dùng "target" để xác định giao dịch cần tác động. Dùng "entries[0]" cho thông tin mới (nếu UPDATE).
-                - Nếu muốn xóa tất cả, đặt "target.deleteAll = true".
-                - Nếu người dùng gửi ảnh hóa đơn, thực hiện OCR, tóm tắt, hỏi có muốn thêm không. Intent = ADVICE.
-                - Nếu sửa thông tin hóa đơn chưa lưu, giữ intent ADVICE, KHÔNG dùng UPDATE.
-                - CHỈ dùng UPDATE khi sửa giao dịch ĐÃ LƯU.
-                - KHÔNG dùng INSERT trực tiếp từ ảnh trừ khi người dùng nói "Thêm" hoặc "Lưu".
-
-                SCHEMA:
-                {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "UNKNOWN",
-                  "adviceReply": "string (chỉ dùng cho ADVICE)",
                   "query": {
                     "metric": "TOTAL" | "TOP_CATEGORY" | "LIST" | "AVERAGE" | "TREND" | "PERCENTAGE" | "BUDGET" | "MONTHLY_SUMMARY" | "FINANCIAL_HEALTH" | "WEEKLY_PATTERN" | "SMART_SUGGESTION" | "FINANCIAL_SCORE",
                     "type": "EXPENSE" | "INCOME" | "ALL",
@@ -221,33 +156,14 @@ public class GeminiClientWrapper {
                   ]
                 }
 
-                VÍ DỤ SET_BUDGET:
-                - "Hạn mức ăn uống 5 triệu": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
-                - "Ăn phở 5 triệu": intent=INSERT (vì đây là hành động tiêu phí, không phải đặt mục tiêu)
+                EXAMPLES:
+                - "Set budget for food 5M": intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}]
+                - "Set income goal for salary 20M": intent=SET_INCOME_TARGET, entries=[{amount: 20000000, categoryName: "Lương"}]
+                - "How can I save?": intent=ADVICE, adviceReply="..."
 
-                VÍ DỤ UPDATE/DELETE:
-                - "Sửa khoản ăn trưa hôm qua thành 50k": intent=UPDATE, target={noteKeywords: "ăn trưa", date: "hôm qua"}, entries=[{amount: 50000}]
-                - "Xóa giao dịch 45k": intent=DELETE, target={amount: 45000}
-                - "Xóa tất cả giao dịch hôm nay": intent=DELETE, target={date: "hôm nay", deleteAll: true}
-                - "Xóa giao dịch đổ xăng 50k": intent=DELETE, target={amount: 50000, noteKeywords: "đổ xăng"}
-
-                VÍ DỤ QUERY NÂNG CAO:
-                - "Trung bình mỗi ngày tiêu bao nhiêu": metric=AVERAGE
-                - "Chi phí tháng này tăng hay giảm": metric=TREND
-                - "Tỷ lệ chi tiêu các nhóm": metric=PERCENTAGE
-                - "Ngân sách ăn uống còn bao nhiêu": metric=BUDGET
-                - "Tóm tắt tháng này": metric=MONTHLY_SUMMARY
-                - "Sức khỏe tài chính": metric=FINANCIAL_HEALTH
-                - "Cuối tuần tiêu nhiều hơn không": metric=WEEKLY_PATTERN
-                - "Gợi ý tiết kiệm": metric=SMART_SUGGESTION
-                - "Chấm điểm tài chính": metric=FINANCIAL_SCORE
-
-                VÍ DỤ ADVICE:
-                - "Làm sao tiết kiệm tiền?": intent=ADVICE, adviceReply="Để tiết kiệm tiền, bạn nên..."
-
-                ĐẦU VÀO:
+                INPUT:
                 %s
-                """.formatted(today.format(DATE_FMT), categories, history, message);
+                """.formatted(langName, today.format(DATE_FMT), categories, history, adviceInstr, message);
     }
 
     // ═════════════════════════════════════════════════════════

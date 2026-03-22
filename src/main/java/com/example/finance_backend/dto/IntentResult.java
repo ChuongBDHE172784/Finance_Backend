@@ -23,6 +23,7 @@ public class IntentResult {
         FINANCIAL_SCORE,
         GENERAL_CHAT,
         SET_BUDGET,
+        SET_INCOME_TARGET,
         UNKNOWN
     }
 
@@ -53,7 +54,8 @@ public class IntentResult {
             case MONTHLY_SUMMARY -> "QUERY";
             case FINANCIAL_SCORE -> "QUERY";
             case GENERAL_CHAT -> "ADVICE";
-            case SET_BUDGET -> "ADVICE";
+            case SET_BUDGET -> "QUERY";
+            case SET_INCOME_TARGET -> "QUERY";
             case UNKNOWN -> "UNKNOWN";
         };
     }

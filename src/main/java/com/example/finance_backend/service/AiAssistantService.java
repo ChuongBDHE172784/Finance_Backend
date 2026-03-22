@@ -2,13 +2,16 @@ package com.example.finance_backend.service;
 
 import com.example.finance_backend.dto.*;
 import com.example.finance_backend.dto.IntentResult.Intent;
-import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.Account;
+import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.Budget;
+import com.example.finance_backend.entity.Category;
+import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.AiMessageRepository;
 import com.example.finance_backend.repository.BudgetRepository;
+import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.ai.*;
 import com.example.finance_backend.service.ai.FinancialScoreEngine.FinancialScoreResult;
@@ -58,6 +61,7 @@ public class AiAssistantService {
     private final AiMessageRepository aiMessageRepository;
     private final CategoryService categoryService;
     private final BudgetRepository budgetRepository;
+    private final CategoryRepository categoryRepository;
 
     // ═════════════════════════════════════════════════════════
     // MAIN PIPELINE ENTRY POINT
@@ -134,6 +138,9 @@ public class AiAssistantService {
                 break;
             case SET_BUDGET:
                 response = handleSetBudget(parsed, geminiResult, request.getUserId(), language);
+                break;
+            case SET_INCOME_TARGET:
+                response = handleSetIncomeTarget(parsed, geminiResult, request.getUserId(), language);
                 break;
             case FINANCIAL_ADVICE:
             case GENERAL_CHAT:
@@ -767,6 +774,7 @@ public class AiAssistantService {
             case "DELETE" -> Intent.DELETE_TRANSACTION;
             case "ADVICE" -> Intent.FINANCIAL_ADVICE;
             case "SET_BUDGET" -> Intent.SET_BUDGET;
+            case "SET_INCOME_TARGET" -> Intent.SET_INCOME_TARGET;
             default -> Intent.UNKNOWN;
         };
         return IntentResult.builder().intent(intent).confidence(0.9)
@@ -906,10 +914,11 @@ public class AiAssistantService {
                 ? gemini.entries.get(0) : null;
         
         if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
-            return AiAssistantResponse.builder().intent("ADVICE")
-                    .reply(responseGenerator.t(language,
+            String reply = responseGenerator.t(language,
                             "Bạn muốn đặt ngân sách bao nhiêu? (Ví dụ: Ngân sách ăn uống 5 triệu)",
-                            "How much budget do you want to set? (e.g., Set food budget to 5M)")).build();
+                            "How much budget do you want to set? (e.g., Set food budget to 5M)");
+            reply += getCategoryListResponse(EntryType.EXPENSE, language);
+            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
 
         String normCat = entityExtractor.normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
@@ -917,10 +926,26 @@ public class AiAssistantService {
         Long catId = resolveCategoryId(nameToId, normCat, null);
 
         if (catId == null) {
+            String reply = responseGenerator.t(language,
+                            "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục chi tiêu sau nhé:",
+                            "I couldn't find this category. Please choose one of the following expense categories:",
+                            "このカテゴリーが見つかりませんでした。以下の支出カテゴリーから選択してください：",
+                            "이 카테고리를 찾을 수 없습니다. 다음 지출 카테고리 중에서 선택하십시오:",
+                            "找不到该类别。请从以下支出类别中选择："
+            );
+            reply += getCategoryListResponse(EntryType.EXPENSE, language);
+            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+        }
+
+        // Validate that category is EXPENSE type for SET_BUDGET
+        EntryType catType = categoryRepository.findById(catId)
+                .map(Category::getType)
+                .orElse(null);
+        if (catType == EntryType.INCOME) {
             return AiAssistantResponse.builder().intent("ADVICE")
                     .reply(responseGenerator.t(language,
-                            "Mình không tìm thấy danh mục này. Bạn hãy chọn danh mục cụ thể nhé.",
-                            "I couldn't find this category. Please specify a valid category.")).build();
+                            "Danh mục này thuộc loại THU. Bạn hãy dùng \"Mục tiêu [tên danh mục] [số tiền]\" để đặt mục tiêu thu nhập.",
+                            "This category is an INCOME type. Use \"Target [category] [amount]\" to set an income target instead.")).build();
         }
 
         // Determine dates (default to current month, unless Gemini extracted a date)
@@ -954,6 +979,100 @@ public class AiAssistantService {
                         responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(), start.getYear()));
 
         return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // INCOME TARGET SETTER
+    // ═════════════════════════════════════════════════════════
+
+    private AiAssistantResponse handleSetIncomeTarget(ParsedMessage parsed, GeminiParseResult gemini, Long userId, String language) {
+        if (userId == null) {
+            return AiAssistantResponse.builder().intent("ADVICE")
+                    .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt mục tiêu thu nhập.", "Please log in to set an income target.")).build();
+        }
+
+        GeminiParsedEntry data = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
+                ? gemini.entries.get(0) : null;
+
+        if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
+            String reply = responseGenerator.t(language,
+                            "Bạn muốn đặt mục tiêu thu bao nhiêu? (Ví dụ: Mục tiêu lương 20 triệu)",
+                            "What income target do you want to set? (e.g., Set salary target to 20M)");
+            reply += getCategoryListResponse(EntryType.INCOME, language);
+            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+        }
+
+        String normCat = entityExtractor.normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        Map<String, Long> nameToId = getNameToIdMap();
+        Long catId = resolveCategoryId(nameToId, normCat, null);
+
+        if (catId == null) {
+            String msgVi = "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục thu nhập sau nhé:";
+            String msgEn = "I couldn't find this category. Please choose one of the following income categories:";
+            String msgJa = "このカテゴリーが見つかりませんでした。以下の収入カテゴリーから選択してください：";
+            String msgKo = "이 카테고리를 찾을 수 없습니다. 다음 수입 카테고리 중에서 선택하십시오:";
+            String msgZh = "找不到该类别。请从以下收入类别中选择：";
+            String reply = responseGenerator.t(language, msgVi, msgEn, msgJa, msgKo, msgZh);
+            reply += getCategoryListResponse(EntryType.INCOME, language);
+            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+        }
+
+        // Validate that category is INCOME type
+        EntryType catType = categoryRepository.findById(catId)
+                .map(Category::getType)
+                .orElse(null);
+        if (catType == EntryType.EXPENSE) {
+            return AiAssistantResponse.builder().intent("ADVICE")
+                    .reply(responseGenerator.t(language,
+                            "Danh mục này thuộc loại CHI. Bạn hãy dùng \"Hạn mức [tên danh mục] [số tiền]\" để đặt ngân sách chi.",
+                            "This category is an EXPENSE type. Use \"Budget [category] [amount]\" to set an expense budget instead.")).build();
+        }
+
+        // Determine dates (default to current month)
+        LocalDate today = LocalDate.now();
+        LocalDate start = today.withDayOfMonth(1);
+        if (data.date != null) {
+            LocalDate parsedDate = parseDate(data.date, today);
+            if (parsedDate.isAfter(today)) {
+                start = parsedDate.withDayOfMonth(1);
+            }
+        }
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+
+        // Upsert budget (income target)
+        Optional<Budget> existing = budgetRepository.findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                userId, catId, start, end);
+
+        Budget budget = existing.orElse(new Budget());
+        budget.setUserId(userId);
+        budget.setCategoryId(catId);
+        budget.setAmount(data.amount);
+        budget.setStartDate(start);
+        budget.setEndDate(end);
+        budgetRepository.save(budget);
+
+        String catName = categoryService.getIdToNameMap().get(catId);
+        String reply = responseGenerator.t(language,
+                String.format("Vâng, mình đã ghi nhận mục tiêu thu nhập cho danh mục **%s** là **%s** cho tháng %d/%d.",
+                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(), start.getYear()),
+                String.format("Okay, I've set a **%s** income target for **%s** for month %d/%d.",
+                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(), start.getYear()));
+
+        return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
+    }
+
+    private String getCategoryListResponse(EntryType type, String language) {
+        List<Category> cats = categoryRepository.findByTypeOrderByNameAsc(type);
+        if (cats.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\n");
+        sb.append(type == EntryType.INCOME 
+            ? responseGenerator.t(language, "📌 Danh mục thu nhập:", "📌 Income categories:", "📌 収入カテゴリー:", "📌 수입 카테고리:", "📌 收入类别:")
+            : responseGenerator.t(language, "📌 Danh mục chi tiêu:", "📌 Expense categories:", "📌 支出カテゴリー:", "📌 지출 카테고리:", "📌 支出类别:"));
+        sb.append("\n");
+        for (Category c : cats) {
+            sb.append("- ").append(c.getName()).append("\n");
+        }
+        return sb.toString();
     }
 
     // ── Inner helper class ──

@@ -13,4 +13,6 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     boolean existsByName(String name);
 
     Optional<Category> findByName(String name);
+
+    List<Category> findByTypeOrderByNameAsc(com.example.finance_backend.entity.EntryType type);
 }

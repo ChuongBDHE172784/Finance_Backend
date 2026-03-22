@@ -1,8 +1,8 @@
 package com.example.finance_backend.service.ai;
 
-import com.example.finance_backend.entity.Budget;
 import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.repository.BudgetRepository;
+import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.service.CategoryService;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,7 +12,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 
@@ -26,13 +25,14 @@ public class FinancialScoreEngineTest {
     @Mock private FinancialEntryRepository entryRepository;
     @Mock private BudgetRepository budgetRepository;
     @Mock private CategoryService categoryService;
+    @Mock private CategoryRepository categoryRepository;
 
     private FinancialScoreEngine engine;
     private SpendingAnalyticsService analyticsService;
 
     @BeforeEach
     void setUp() {
-        analyticsService = new SpendingAnalyticsService(entryRepository, categoryService, budgetRepository);
+        analyticsService = new SpendingAnalyticsService(entryRepository, categoryService, budgetRepository, categoryRepository);
         engine = new FinancialScoreEngine(entryRepository, budgetRepository, analyticsService);
     }
 

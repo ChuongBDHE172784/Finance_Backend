@@ -24,14 +24,21 @@ public class ResponseGenerator {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final Locale VI_LOCALE = new Locale("vi", "VN");
-    private static final Locale EN_LOCALE = Locale.US;
 
     // ═════════════════════════════════════════════════════════
     // TRANSLATION HELPER
     // ═════════════════════════════════════════════════════════
 
     public String t(String language, String vi, String en) {
-        return isEnglish(language) ? en : vi;
+        return "en".equals(language) ? en : vi;
+    }
+
+    public String t(String language, String vi, String en, String ja, String ko, String zh) {
+        if ("en".equals(language)) return en;
+        if ("ja".equals(language)) return ja;
+        if ("ko".equals(language)) return ko;
+        if ("zh".equals(language)) return zh;
+        return vi;
     }
 
     public boolean isEnglish(String language) {
@@ -44,8 +51,20 @@ public class ResponseGenerator {
 
     public String formatVnd(BigDecimal value, String language) {
         BigDecimal normalized = value == null ? BigDecimal.ZERO : value.setScale(0, RoundingMode.HALF_UP);
-        Locale locale = isEnglish(language) ? EN_LOCALE : VI_LOCALE;
-        String suffix = isEnglish(language) ? " VND" : " đ";
+        Locale locale = switch (language) {
+            case "en" -> Locale.US;
+            case "ja" -> Locale.JAPAN;
+            case "ko" -> Locale.KOREA;
+            case "zh" -> Locale.CHINA;
+            default -> VI_LOCALE;
+        };
+        String suffix = switch (language) {
+            case "en" -> " VND";
+            case "ja" -> " 円";
+            case "ko" -> " 원";
+            case "zh" -> " 元";
+            default -> " đ";
+        };
         return NumberFormat.getInstance(locale).format(normalized) + suffix;
     }
 
@@ -205,42 +224,132 @@ public class ResponseGenerator {
     // ═════════════════════════════════════════════════════════
 
     public String budgetStatusReply(BudgetStatusResult status, String language) {
-        if (status.isOverBudget()) {
-            return isEnglish(language)
-                    ? String.format("⚠️ You've exceeded your %s budget by %s! (Budget: %s, Spent: %s — %s%% used)",
-                    status.getCategoryName(), formatVnd(status.getOverAmount(), language),
-                    formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
-                    status.getPercentUsed())
-                    : String.format("⚠️ Bạn đã vượt ngân sách %s %s! (Ngân sách: %s, Đã chi: %s — %s%%)",
-                    status.getCategoryName(), formatVnd(status.getOverAmount(), language),
-                    formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
-                    status.getPercentUsed());
+        if ("INCOME_TARGET".equals(status.getPlanType())) {
+            // Income target logic
+            if (status.isOverBudget()) {
+                // "overBudget" means "achieved" for income targets
+                return t(language,
+                        String.format("🎉 Tuyệt vời! Bạn đã đạt mục tiêu thu từ %s! (Mục tiêu: %s, Đã thu: %s — %s%%)",
+                                status.getCategoryName(), formatVnd(status.getBudgetAmount(), language),
+                                formatVnd(status.getSpentAmount(), language), status.getPercentUsed()),
+                        String.format("🎉 Great! You've achieved your %s income target! (Target: %s, Earned: %s — %s%%)",
+                                status.getCategoryName(), formatVnd(status.getBudgetAmount(), language),
+                                formatVnd(status.getSpentAmount(), language), status.getPercentUsed()),
+                        String.format("🎉 素晴らしい！%sの収入目標を達成しました！（目標：%s、現在の収得額：%s — %s%%）",
+                                status.getCategoryName(), formatVnd(status.getBudgetAmount(), language),
+                                formatVnd(status.getSpentAmount(), language), status.getPercentUsed()),
+                        String.format("🎉 대단해요! %s 수입 목표를 달성했습니다! (목표: %s, 현재 수입: %s — %s%%)",
+                                status.getCategoryName(), formatVnd(status.getBudgetAmount(), language),
+                                formatVnd(status.getSpentAmount(), language), status.getPercentUsed()),
+                        String.format("🎉 太棒了！您已达成 %s 的收入目标！（目标：%s，已收入：%s — %s%%）",
+                                status.getCategoryName(), formatVnd(status.getBudgetAmount(), language),
+                                formatVnd(status.getSpentAmount(), language), status.getPercentUsed())
+                );
+            }
+            return t(language,
+                    String.format("🎯 Mục tiêu thu %s: đã đạt %s%% (%s / %s)",
+                            status.getCategoryName(), status.getPercentUsed(),
+                            formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                    String.format("🎯 %s income target: %s%% achieved (%s / %s)",
+                            status.getCategoryName(), status.getPercentUsed(),
+                            formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                    String.format("🎯 %sの収入目標：%s%% 達成（%s / %s）",
+                            status.getCategoryName(), status.getPercentUsed(),
+                            formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                    String.format("🎯 %s 수입 목표: %s%% 달성 (%s / %s)",
+                            status.getCategoryName(), status.getPercentUsed(),
+                            formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                    String.format("🎯 %s 收入目标：已达成 %s%%（%s / %s）",
+                            status.getCategoryName(), status.getPercentUsed(),
+                            formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language))
+            );
         }
-        return isEnglish(language)
-                ? String.format("📊 %s budget: %s%% used (%s / %s)",
-                status.getCategoryName(), status.getPercentUsed(),
-                formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language))
-                : String.format("📊 Ngân sách %s: đã dùng %s%% (%s / %s)",
-                status.getCategoryName(), status.getPercentUsed(),
-                formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language));
+
+        // Expense budget logic
+        if (status.isOverBudget()) {
+            return t(language,
+                    String.format("⚠️ Bạn đã vượt ngân sách %s %s! (Ngân sách: %s, Đã chi: %s — %s%%)",
+                            status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                            formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                            status.getPercentUsed()),
+                    String.format("⚠️ You've exceeded your %s budget by %s! (Budget: %s, Spent: %s — %s%% used)",
+                            status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                            formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                            status.getPercentUsed()),
+                    String.format("⚠️ %sの予算を%s超過しました！（予算：%s、支出：%s — %s%%使用）",
+                            status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                            formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                            status.getPercentUsed()),
+                    String.format("⚠️ %s 예산을 %s 초과했습니다! (예산: %s, 지출: %s — %s%% 사용)",
+                            status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                            formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                            status.getPercentUsed()),
+                    String.format("⚠️ 您已超出 %s 预算 %s!（预算：%s，已支出：%s — 已使用 %s%%）",
+                            status.getCategoryName(), formatVnd(status.getOverAmount(), language),
+                            formatVnd(status.getBudgetAmount(), language), formatVnd(status.getSpentAmount(), language),
+                            status.getPercentUsed())
+            );
+        }
+        return t(language,
+                String.format("📊 Ngân sách %s: đã dùng %s%% (%s / %s)",
+                        status.getCategoryName(), status.getPercentUsed(),
+                        formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                String.format("📊 %s budget: %s%% used (%s / %s)",
+                        status.getCategoryName(), status.getPercentUsed(),
+                        formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                String.format("📊 %sの予算：%s%% 使用（%s / %s）",
+                        status.getCategoryName(), status.getPercentUsed(),
+                        formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                String.format("📊 %s 예산: %s%% 사용 (%s / %s)",
+                        status.getCategoryName(), status.getPercentUsed(),
+                        formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language)),
+                String.format("📊 %s 预算：已使用 %s%%（%s / %s）",
+                        status.getCategoryName(), status.getPercentUsed(),
+                        formatVnd(status.getSpentAmount(), language), formatVnd(status.getBudgetAmount(), language))
+        );
     }
 
     public String allBudgetStatusReply(List<BudgetStatusResult> statuses, String language) {
         StringBuilder sb = new StringBuilder();
-        sb.append(t(language, "📋 Tình trạng ngân sách:\n", "📋 Budget Status:\n"));
-        for (BudgetStatusResult s : statuses) {
-            String emoji = s.isOverBudget() ? "🔴" : (s.getPercentUsed().compareTo(new BigDecimal("80")) >= 0 ? "🟡" : "🟢");
-            sb.append(String.format("%s %s: %s%% (%s / %s)\n", emoji,
-                    s.getCategoryName(), s.getPercentUsed(),
-                    formatVnd(s.getSpentAmount(), language), formatVnd(s.getBudgetAmount(), language)));
+        sb.append(t(language, "📋 Kế hoạch tài chính:\n", "📋 Financial Plan:\n"));
+
+        // Separate expense budgets and income targets
+        List<BudgetStatusResult> expenseBudgets = statuses.stream()
+                .filter(s -> "EXPENSE_BUDGET".equals(s.getPlanType())).collect(java.util.stream.Collectors.toList());
+        List<BudgetStatusResult> incomeTargets = statuses.stream()
+                .filter(s -> "INCOME_TARGET".equals(s.getPlanType())).collect(java.util.stream.Collectors.toList());
+
+        if (!expenseBudgets.isEmpty()) {
+            sb.append(t(language, "\n💸 Ngân sách chi:\n", "\n💸 Expense Budgets:\n"));
+            for (BudgetStatusResult s : expenseBudgets) {
+                String emoji = s.isOverBudget() ? "🔴" : (s.getPercentUsed().compareTo(new BigDecimal("80")) >= 0 ? "🟡" : "🟢");
+                sb.append(String.format("%s %s: %s%% (%s / %s)\n", emoji,
+                        s.getCategoryName(), s.getPercentUsed(),
+                        formatVnd(s.getSpentAmount(), language), formatVnd(s.getBudgetAmount(), language)));
+            }
         }
+
+        if (!incomeTargets.isEmpty()) {
+            sb.append(t(language, "\n💰 Mục tiêu thu:\n", "\n💰 Income Targets:\n"));
+            for (BudgetStatusResult s : incomeTargets) {
+                String emoji = s.isOverBudget() ? "🎉" : (s.getPercentUsed().compareTo(new BigDecimal("70")) >= 0 ? "🟡" : "🔵");
+                sb.append(String.format("%s %s: %s%% (%s / %s)\n", emoji,
+                        s.getCategoryName(), s.getPercentUsed(),
+                        formatVnd(s.getSpentAmount(), language), formatVnd(s.getBudgetAmount(), language)));
+            }
+        }
+
         return sb.toString().trim();
     }
 
     public String noBudgetData(String language) {
         return t(language,
-                "Bạn chưa đặt ngân sách nào. Bạn có muốn đặt ngân sách cho tháng tới không?",
-                "You haven't set any budgets yet. Would you like to set a budget for next month?");
+                "Bạn chưa đặt kế hoạch tài chính nào (ngân sách chi hoặc mục tiêu thu). Bạn có muốn thiết lập không?",
+                "You haven't set any financial plans (expense budgets or income targets) yet. Would you like to set one up?",
+                "財務計画（支出予算または収入目標）がまだ設定されていません。設定しますか？",
+                "아직 재무 계획(지출 예산 또는 수입 목표)이 설정되지 않았습니다. 설정하시겠습니까?",
+                "您尚未设置任何财务计划（支出预算或收入目标）。您想要设置一个吗？"
+        );
     }
 
     // ═════════════════════════════════════════════════════════
@@ -462,15 +571,24 @@ public class ResponseGenerator {
     // ═════════════════════════════════════════════════════════
 
     private String translateDayOfWeek(DayOfWeek day, String language) {
-        if (isEnglish(language)) return day.name().charAt(0) + day.name().substring(1).toLowerCase();
-        return switch (day) {
-            case MONDAY -> "Thứ Hai";
-            case TUESDAY -> "Thứ Ba";
-            case WEDNESDAY -> "Thứ Tư";
-            case THURSDAY -> "Thứ Năm";
-            case FRIDAY -> "Thứ Sáu";
-            case SATURDAY -> "Thứ Bảy";
-            case SUNDAY -> "Chủ Nhật";
+        if ("en".equals(language)) return day.name().charAt(0) + day.name().substring(1).toLowerCase();
+        return switch (language) {
+            case "ja" -> switch (day) {
+                case MONDAY -> "月曜日"; case TUESDAY -> "火曜日"; case WEDNESDAY -> "水曜日";
+                case THURSDAY -> "木曜日"; case FRIDAY -> "金曜日"; case SATURDAY -> "土曜日"; case SUNDAY -> "日曜日";
+            };
+            case "ko" -> switch (day) {
+                case MONDAY -> "월요일"; case TUESDAY -> "화요일"; case WEDNESDAY -> "수요일";
+                case THURSDAY -> "목요일"; case FRIDAY -> "금요일"; case SATURDAY -> "토요일"; case SUNDAY -> "일요일";
+            };
+            case "zh" -> switch (day) {
+                case MONDAY -> "星期一"; case TUESDAY -> "星期二"; case WEDNESDAY -> "星期三";
+                case THURSDAY -> "星期四"; case FRIDAY -> "星期五"; case SATURDAY -> "星期六"; case SUNDAY -> "星期日";
+            };
+            default -> switch (day) {
+                case MONDAY -> "Thứ Hai"; case TUESDAY -> "Thứ Ba"; case WEDNESDAY -> "Thứ Tư";
+                case THURSDAY -> "Thứ Năm"; case FRIDAY -> "Thứ Sáu"; case SATURDAY -> "Thứ Bảy"; case SUNDAY -> "Chủ Nhật";
+            };
         };
     }
 }
