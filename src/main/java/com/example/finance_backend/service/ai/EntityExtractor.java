@@ -68,7 +68,9 @@ public class EntityExtractor {
     public String inferCategory(String normalizedText) {
         if (normalizedText == null) return null;
         for (var entry : CATEGORY_KEYWORDS.entrySet()) {
-            if (normalizedText.contains(entry.getKey())) {
+            String kw = entry.getKey();
+            // Use word boundary to avoid false positives like "tháng" matching "an"
+            if (normalizedText.matches(".*\\b" + java.util.regex.Pattern.quote(kw) + "\\b.*")) {
                 return entry.getValue();
             }
         }

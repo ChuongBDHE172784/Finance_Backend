@@ -180,9 +180,54 @@ public class AiAssistantServiceTest {
 
                 AiAssistantResponse response = aiAssistantService.handle(request);
 
-                assertFalse(Boolean.TRUE.equals(response.getIsDraft()));
-                assertEquals(1, response.getCreatedCount());
-                assertTrue(response.getReply().contains("Đã lưu") || response.getReply().contains("Saved"));
-                verify(entryService, times(1)).create(any(), any());
-        }
+        assertFalse(Boolean.TRUE.equals(response.getIsDraft()));
+        assertEquals(1, response.getCreatedCount());
+        assertTrue(response.getReply().contains("Đã lưu") || response.getReply().contains("Saved"));
+        verify(entryService, times(1)).create(any(), any());
+    }
+
+    @Test
+    void testCreateBudget_AskCategory() {
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("tạo ngân sách cho tôi")
+                .conversationId("test-budget-cat")
+                .userId(1L)
+                .build();
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("ADVICE", response.getIntent());
+        assertTrue(response.getReply().contains("hạng mục nào"));
+    }
+
+    @Test
+    void testCreateBudget_AskMonth() {
+        when(categoryService.getIdToNameMap()).thenReturn(java.util.Map.of(1L, "Ăn uống"));
+        when(categoryRepository.findById(any())).thenReturn(java.util.Optional.of(
+                com.example.finance_backend.entity.Category.builder().type(com.example.finance_backend.entity.EntryType.EXPENSE).build()
+        ));
+        
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("ngân sách ăn uống 3 triệu")
+                .conversationId("test-budget-month")
+                .userId(1L)
+                .build();
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("ADVICE", response.getIntent());
+        assertTrue(response.getReply().contains("tháng nào"));
+    }
+
+    @Test
+    void testCreateBudget_ProposeDraft() {
+        when(categoryService.getIdToNameMap()).thenReturn(java.util.Map.of(1L, "Ăn uống"));
+        when(categoryRepository.findById(any())).thenReturn(java.util.Optional.of(
+                com.example.finance_backend.entity.Category.builder().type(com.example.finance_backend.entity.EntryType.EXPENSE).build()
+        ));
+        AiAssistantRequest request = AiAssistantRequest.builder()
+                .message("ngân sách ăn uống 3 triệu tháng 6")
+                .conversationId("test-budget-draft")
+                .userId(1L)
+                .build();
+        AiAssistantResponse response = aiAssistantService.handle(request);
+        assertEquals("CREATE_BUDGET", response.getIntent());
+        assertTrue(response.getReply().contains("Bạn có muốn lưu"));
+    }
 }

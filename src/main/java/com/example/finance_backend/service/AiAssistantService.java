@@ -69,6 +69,19 @@ public class AiAssistantService {
     private final CategoryRepository categoryRepository;
 
     // ═════════════════════════════════════════════════════════
+    // CONVERSATION STATE
+    // ═════════════════════════════════════════════════════════
+    public static class PendingPlanAction {
+        public String intent;
+        public String category;
+        public BigDecimal amount;
+        public String month;
+        public String awaitingField;
+    }
+    
+    private final Map<String, PendingPlanAction> planningState = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // ═════════════════════════════════════════════════════════
     // MAIN PIPELINE ENTRY POINT
     // ═════════════════════════════════════════════════════════
 
@@ -123,6 +136,76 @@ public class AiAssistantService {
             intentResult = intentDetector.detect(parsed);
         }
 
+        // ── CATEGORY TYPE FALLBACK (If intent is ambiguous or unknown) ──
+        if (intentResult.getIntent() == Intent.UNKNOWN || intentResult.getIntent() == Intent.INSERT_TRANSACTION) {
+             String norm = parsed.getNormalizedText();
+             // Look for evidence that this is a plan (month, "for", "set", "create")
+             boolean isPlanContext = norm.contains("thang") || norm.contains("month") 
+                                  || norm.contains("cho ") || norm.contains("vao ")
+                                  || norm.contains("dat ") || norm.contains("tao ") || norm.contains("han muc");
+             
+             if (isPlanContext) {
+                 String inferred = entityExtractor.inferCategory(norm);
+                 if (inferred != null) {
+                     Map<String, Long> nameToId = getNameToIdMap();
+                     Long catId = resolveCategoryId(nameToId, entityExtractor.normalizeCategoryName(inferred), null);
+                     if (catId != null) {
+                         EntryType type = categoryRepository.findById(catId).map(Category::getType).orElse(null);
+                         if (type == EntryType.EXPENSE) {
+                             intentResult = IntentResult.builder().intent(Intent.CREATE_BUDGET).confidence(0.7).build();
+                         } else if (type == EntryType.INCOME) {
+                             intentResult = IntentResult.builder().intent(Intent.CREATE_INCOME_GOAL).confidence(0.7).build();
+                         }
+                     }
+                 }
+             }
+        }
+
+        // ── Support Continuation Messages ──
+        PendingPlanAction pending = planningState.get(conversationId);
+        if (pending != null) {
+            String norm = parsed.getNormalizedText();
+            boolean isCancel = norm.contains("hủy") || norm.contains("bo qua") || norm.contains("lam lai") || norm.contains("cancel");
+            if (isCancel) {
+                planningState.remove(conversationId);
+                return finalizeResponse(AiAssistantResponse.builder()
+                        .intent("DELETE").reply(responseGenerator.t(language, "Đã hủy thao tác.", "Operation cancelled.")).build(),
+                        conversationId, message, request.getBase64Image(), request.getUserId());
+            }
+
+            // Treat everything else as continuation of the pending intent
+            Intent forcedIntent = "CREATE_BUDGET".equals(pending.intent) ? Intent.CREATE_BUDGET : Intent.CREATE_INCOME_GOAL;
+            intentResult = IntentResult.builder().intent(forcedIntent).confidence(1.0).source(IntentResult.Source.RULE).build();
+
+            // Detect correction keywords (change, wrong, other, etc.)
+            boolean isCorrection = norm.contains("doi ") || norm.contains("sai ") 
+                                || norm.contains("nham") || norm.contains("khac") 
+                                || norm.contains("thay ") || norm.contains("sua ");
+            if (isCorrection) {
+                if (norm.contains("thang") || norm.contains("ngay") || norm.contains("month")) pending.month = null;
+                if (norm.contains("tien") || norm.contains("so tien") || norm.contains("amount")) pending.amount = null;
+                if (norm.contains("hang muc") || norm.contains("danh muc") || norm.contains("loai") || norm.contains("khac") || norm.contains("category")) pending.category = null;
+            }
+            
+            // Try to extract any new info (month, amount, category)
+            if (geminiResult != null && geminiResult.entries != null && !geminiResult.entries.isEmpty()) {
+                GeminiParsedEntry e = geminiResult.entries.get(0);
+                if (e.amount != null) pending.amount = e.amount;
+                if (e.categoryName != null) pending.category = e.categoryName;
+                if (e.date != null) pending.month = e.date;
+            }
+            // Manually extract month if possible
+            if (pending.month == null && (message.toLowerCase().contains("tháng") || message.toLowerCase().contains("month") || message.matches(".*\\b(t1|t2|t3|t4|t5|t6|t7|t8|t9|t10|t11|t12)\\b.*"))) {
+                pending.month = message; // Just store the raw string for parseDate logic
+            }
+            if (pending.category == null && parsed.getNormalizedText().length() > 0 && !parsed.hasAmounts() && !isRuleBasedConfirmation(parsed.getNormalizedText())) {
+                 // Assume the text might be a category if it's not a confirmation and no amount
+                 if (!message.toLowerCase().contains("tháng") && !message.toLowerCase().contains("month")) {
+                     pending.category = message;
+                 }
+            }
+        }
+
         // Step 5: Dispatch by intent
         AiAssistantResponse response;
         switch (intentResult.getIntent()) {
@@ -139,6 +222,7 @@ public class AiAssistantService {
             case DELETE_TRANSACTION:
                 response = handleDelete(message, parsed, geminiResult, language);
                 break;
+            case VIEW_FINANCIAL_PLAN:
             case BUDGET_QUERY:
                 response = handleBudgetQuery(request.getUserId(), language);
                 break;
@@ -148,11 +232,11 @@ public class AiAssistantService {
             case FINANCIAL_SCORE:
                 response = handleFinancialScore(request.getUserId(), language);
                 break;
-            case SET_BUDGET:
-                response = handleSetBudget(parsed, geminiResult, request.getUserId(), language);
+            case CREATE_BUDGET:
+                response = handleCreateBudget(parsed, geminiResult, request.getUserId(), language, conversationId);
                 break;
-            case SET_INCOME_TARGET:
-                response = handleSetIncomeTarget(parsed, geminiResult, request.getUserId(), language);
+            case CREATE_INCOME_GOAL:
+                response = handleCreateIncomeGoal(parsed, geminiResult, request.getUserId(), language, conversationId);
                 break;
             case FINANCIAL_ADVICE:
             case GENERAL_CHAT:
@@ -886,8 +970,11 @@ public class AiAssistantService {
             case "UPDATE" -> Intent.UPDATE_TRANSACTION;
             case "DELETE" -> Intent.DELETE_TRANSACTION;
             case "ADVICE" -> Intent.FINANCIAL_ADVICE;
-            case "SET_BUDGET" -> Intent.SET_BUDGET;
-            case "SET_INCOME_TARGET" -> Intent.SET_INCOME_TARGET;
+            case "SET_BUDGET" -> Intent.CREATE_BUDGET;
+            case "CREATE_BUDGET" -> Intent.CREATE_BUDGET;
+            case "SET_INCOME_TARGET" -> Intent.CREATE_INCOME_GOAL;
+            case "CREATE_INCOME_GOAL" -> Intent.CREATE_INCOME_GOAL;
+            case "VIEW_FINANCIAL_PLAN" -> Intent.VIEW_FINANCIAL_PLAN;
             default -> Intent.UNKNOWN;
         };
         return IntentResult.builder().intent(intent).confidence(0.9)
@@ -1079,8 +1166,8 @@ public class AiAssistantService {
     // BUDGET SETTER
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleSetBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
-            String language) {
+    private AiAssistantResponse handleCreateBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
+            String language, String conversationId) {
         if (userId == null) {
             return AiAssistantResponse.builder().intent("ADVICE")
                     .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt ngân sách.",
@@ -1091,55 +1178,140 @@ public class AiAssistantService {
         GeminiParsedEntry data = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
                 ? gemini.entries.get(0)
                 : null;
+                
+        // Sync pending state
+        PendingPlanAction pending = planningState.computeIfAbsent(conversationId, k -> {
+            PendingPlanAction p = new PendingPlanAction();
+            p.intent = "CREATE_BUDGET";
+            return p;
+        });
 
-        if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
-            String reply = responseGenerator.t(language,
-                    "Bạn muốn đặt ngân sách bao nhiêu? (Ví dụ: Ngân sách ăn uống 5 triệu)",
-                    "How much budget do you want to set? (e.g., Set food budget to 5M)");
-            reply += getCategoryListResponse(EntryType.EXPENSE, language);
-            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
-        }
+        if (data != null && data.amount != null && data.amount.compareTo(BigDecimal.ZERO) > 0) pending.amount = data.amount;
+        if (data != null && data.categoryName != null) pending.category = data.categoryName;
+        if (data != null && data.date != null) pending.month = data.date;
 
-        String normCat = entityExtractor
-                .normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        // 1. Resolve Category
         Map<String, Long> nameToId = getNameToIdMap();
-        Long catId = resolveCategoryId(nameToId, normCat, null);
+        Long catId = null;
+        if (pending.category != null) {
+            catId = resolveCategoryId(nameToId, entityExtractor.normalizeCategoryName(pending.category), null);
+        }
+        if (catId == null) {
+            String textToInfer = parsed.getNormalizedText()
+                    .replaceAll("\\b(ngan sach|han muc|muc tieu|budget|goal|limit|luong|thu nhap)\\b", " ")
+                    .replaceAll("\\s+", " ").trim();
+            String inferred = entityExtractor.inferCategory(textToInfer);
+            if (inferred != null) {
+                catId = resolveCategoryId(nameToId, inferred, null);
+            } else if ("CATEGORY".equals(pending.awaitingField)) {
+                catId = resolveCategoryId(nameToId, entityExtractor.normalizeCategoryName(parsed.getNormalizedText()), null);
+            }
+        }
 
         if (catId == null) {
+            pending.awaitingField = "CATEGORY";
             String reply = responseGenerator.t(language,
-                    "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục chi tiêu sau nhé:",
-                    "I couldn't find this category. Please choose one of the following expense categories:",
-                    "このカテゴリーが見つかりませんでした。以下の支出カテゴリーから選択してください：",
-                    "이 카테고리를 찾을 수 없습니다. 다음 지출 카테고리 중에서 선택하십시오:",
-                    "找不到该类别。请从以下支出类别中选择：");
+                    "Bạn muốn đặt ngân sách cho hạng mục nào?\n\nCác hạng mục hiện có:",
+                    "Which category do you want to set a budget for?\n\nAvailable categories:");
             reply += getCategoryListResponse(EntryType.EXPENSE, language);
+            reply += responseGenerator.t(language, "\n\nVí dụ: \"Tạo ngân sách [tên hạng mục] 3 triệu\"", "\n\nExample: \"Create budget [category] 3 million\"");
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
 
-        // Validate that category is EXPENSE type for SET_BUDGET
+        // Store resolved category name
+        final Long finalCatId = catId;
+        String resolvedName = nameToId.entrySet().stream()
+                .filter(e -> e.getValue().equals(finalCatId))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(pending.category != null ? pending.category : parsed.getOriginalText());
+        pending.category = resolvedName;
+
         EntryType catType = categoryRepository.findById(catId)
                 .map(Category::getType)
                 .orElse(null);
         if (catType == EntryType.INCOME) {
-            return AiAssistantResponse.builder().intent("ADVICE")
-                    .reply(responseGenerator.t(language,
-                            "Danh mục này thuộc loại THU. Bạn hãy dùng \"Mục tiêu [tên danh mục] [số tiền]\" để đặt mục tiêu thu nhập.",
-                            "This category is an INCOME type. Use \"Target [category] [amount]\" to set an income target instead."))
-                    .build();
-        }
-
-        // Determine dates (default to current month, unless Gemini extracted a date)
-        LocalDate today = LocalDate.now();
-        LocalDate start = today.withDayOfMonth(1);
-        if (data.date != null) {
-            LocalDate parsedDate = parseDate(data.date, today);
-            if (parsedDate.isAfter(today)) {
-                start = parsedDate.withDayOfMonth(1);
+            // Check if the user actually mentioned an income category or if it was just inferred from a keyword in a trigger message
+            boolean isExplicit = (parsed.getOriginalText().toLowerCase().contains(resolvedName.toLowerCase()));
+            if (!isExplicit) {
+                // False positive inference: Proceed to ask for category selection as if catId was null
+                catId = null;
+                pending.category = null;
+                pending.awaitingField = "CATEGORY";
+                String reply = responseGenerator.t(language,
+                        "Bạn muốn đặt ngân sách cho hạng mục nào?\n\nCác hạng mục hiện có:",
+                        "Which category do you want to set a budget for?\n\nAvailable categories:");
+                reply += getCategoryListResponse(EntryType.EXPENSE, language);
+                reply += responseGenerator.t(language, "\n\nVí dụ: \"Tạo ngân sách [tên hạng mục] 3 triệu\"", "\n\nExample: \"Create budget [category] 3 million\"");
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+            } else {
+                pending.category = null; // Clear to trigger re-selection
+                pending.awaitingField = "CATEGORY";
+                String reply = responseGenerator.t(language,
+                        String.format("Hạng mục **'%s'** thuộc loại THU. Vì bạn đang đặt ngân sách chi tiêu, hãy chọn một danh mục CHI bên dưới:", resolvedName),
+                        String.format("The category **'%s'** is an INCOME type. Since you are setting a spending budget, please choose an EXPENSE category below:", resolvedName));
+                reply += getCategoryListResponse(EntryType.EXPENSE, language);
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
             }
         }
-        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
 
-        // Upsert budget
+        // Amount missing
+        if (pending.amount == null || pending.amount.compareTo(BigDecimal.ZERO) <= 0) {
+            // Attempt extraction from message
+            BigDecimal msgAmt = textPreprocessor.extractSingleAmount(parsed.getOriginalText());
+            if (msgAmt != null) {
+                pending.amount = msgAmt;
+            } else {
+                pending.awaitingField = "AMOUNT";
+                String catName = categoryService.getIdToNameMap().get(catId);
+                String reply = responseGenerator.t(language,
+                        "Bạn muốn đặt ngân sách bao nhiêu cho " + catName + "?",
+                        "How much budget do you want to set for " + catName + "?");
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+            }
+        }
+
+        // CASE 2: Category + Amount detected but NO month -> ask which month
+        if (pending.month == null || pending.month.isBlank()) {
+            if (parsed.getStartDate() != null) {
+                pending.month = parsed.getStartDate().toString();
+            } else {
+                String lowerMessage = parsed.getOriginalText().toLowerCase();
+                if (lowerMessage.contains("tháng") || lowerMessage.contains("month") 
+                    || lowerMessage.matches(".*\\b(t1|t2|t3|t4|t5|t6|t7|t8|t9|t10|t11|t12)\\b.*")) {
+                    pending.month = parsed.getOriginalText();
+                } else {
+                    pending.awaitingField = "MONTH";
+                    String reply = responseGenerator.t(language,
+                            "Bạn muốn đặt ngân sách này cho tháng nào?\n\nVí dụ:\ntháng này\ntháng 6\ntháng 12",
+                            "Which month do you want to set this budget for?\n\nExamples:\nthis month\nmonth 6\nmonth 12");
+                    return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+                }
+            }
+        }
+
+        // Determine dates from extracted data or current date if somehow fallback needed after keyword detected
+        LocalDate today = LocalDate.now();
+        LocalDate parsedDate = parseDate(pending.month, today);
+        LocalDate start = parsedDate.withDayOfMonth(1);
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+        
+        String catName = categoryService.getIdToNameMap().get(catId);
+        
+        // Is Confirmation?
+        boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation)) || isRuleBasedConfirmation(parsed.getNormalizedText());
+        if (!isConfirmation) {
+            pending.awaitingField = "CONFIRMATION";
+            // CASE 1: Propose creating the budget
+            String reply = responseGenerator.t(language,
+                    String.format("Bạn muốn tạo ngân sách:\n\nTháng: %d/%d\nHạng mục: %s\nSố tiền: %s\n\nBạn có muốn lưu ngân sách này không?",
+                            start.getMonthValue(), start.getYear(), catName, responseGenerator.formatVnd(pending.amount, language)),
+                    String.format("You want to create a budget:\n\nMonth: %d/%d\nCategory: %s\nAmount: %s\n\nDo you want to save this budget?",
+                            start.getMonthValue(), start.getYear(), catName, responseGenerator.formatVnd(pending.amount, language)));
+            return AiAssistantResponse.builder().intent("CREATE_BUDGET").refreshRequired(false).reply(reply).build();
+        }
+
+        // Action confirmed: Upsert budget
         Optional<Budget> existing = budgetRepository
                 .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
                         userId, catId, start, end);
@@ -1147,18 +1319,19 @@ public class AiAssistantService {
         Budget budget = existing.orElse(new Budget());
         budget.setUserId(userId);
         budget.setCategoryId(catId);
-        budget.setAmount(data.amount);
+        budget.setAmount(pending.amount);
         budget.setStartDate(start);
         budget.setEndDate(end);
         budgetRepository.save(budget);
+        
+        planningState.remove(conversationId);
 
-        String catName = categoryService.getIdToNameMap().get(catId);
         String reply = responseGenerator.t(language,
                 String.format("Vâng, mình đã ghi nhận hạn mức ngân sách cho danh mục **%s** là **%s** cho tháng %d/%d.",
-                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(),
+                        catName, responseGenerator.formatVnd(pending.amount, language), start.getMonthValue(),
                         start.getYear()),
                 String.format("Okay, I've set a **%s** budget for **%s** for month %d/%d.",
-                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(),
+                        responseGenerator.formatVnd(pending.amount, language), catName, start.getMonthValue(),
                         start.getYear()));
 
         return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
@@ -1168,8 +1341,8 @@ public class AiAssistantService {
     // INCOME TARGET SETTER
     // ═════════════════════════════════════════════════════════
 
-    private AiAssistantResponse handleSetIncomeTarget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
-            String language) {
+    private AiAssistantResponse handleCreateIncomeGoal(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
+            String language, String conversationId) {
         if (userId == null) {
             return AiAssistantResponse.builder().intent("ADVICE")
                     .reply(responseGenerator.t(language, "Bạn cần đăng nhập để đặt mục tiêu thu nhập.",
@@ -1181,54 +1354,139 @@ public class AiAssistantService {
                 ? gemini.entries.get(0)
                 : null;
 
-        if (data == null || data.amount == null || data.amount.compareTo(BigDecimal.ZERO) <= 0) {
-            String reply = responseGenerator.t(language,
-                    "Bạn muốn đặt mục tiêu thu bao nhiêu? (Ví dụ: Mục tiêu lương 20 triệu)",
-                    "What income target do you want to set? (e.g., Set salary target to 20M)");
-            reply += getCategoryListResponse(EntryType.INCOME, language);
-            return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
-        }
+        // Sync pending state
+        PendingPlanAction pending = planningState.computeIfAbsent(conversationId, k -> {
+            PendingPlanAction p = new PendingPlanAction();
+            p.intent = "CREATE_INCOME_GOAL";
+            return p;
+        });
 
-        String normCat = entityExtractor
-                .normalizeCategoryName(data.categoryName != null ? data.categoryName : parsed.getNormalizedText());
+        if (data != null && data.amount != null && data.amount.compareTo(BigDecimal.ZERO) > 0) pending.amount = data.amount;
+        if (data != null && data.categoryName != null) pending.category = data.categoryName;
+        if (data != null && data.date != null) pending.month = data.date;
+
+        // 1. Resolve Category
         Map<String, Long> nameToId = getNameToIdMap();
-        Long catId = resolveCategoryId(nameToId, normCat, null);
+        Long catId = null;
+        if (pending.category != null) {
+            catId = resolveCategoryId(nameToId, entityExtractor.normalizeCategoryName(pending.category), null);
+        }
+        if (catId == null) {
+            String textToInfer = parsed.getNormalizedText()
+                    .replaceAll("\\b(ngan sach|han muc|muc tieu|budget|goal|limit|luong|thu nhap)\\b", " ")
+                    .replaceAll("\\s+", " ").trim();
+            String inferred = entityExtractor.inferCategory(textToInfer);
+            if (inferred != null) {
+                catId = resolveCategoryId(nameToId, inferred, null);
+            } else if ("CATEGORY".equals(pending.awaitingField)) {
+                catId = resolveCategoryId(nameToId, entityExtractor.normalizeCategoryName(parsed.getNormalizedText()), null);
+            }
+        }
 
         if (catId == null) {
-            String msgVi = "Mình không tìm thấy danh mục này. Bạn hãy chọn một trong các danh mục thu nhập sau nhé:";
-            String msgEn = "I couldn't find this category. Please choose one of the following income categories:";
-            String msgJa = "このカテゴリーが見つかりませんでした。以下の収入カテゴリーから選択してください：";
-            String msgKo = "이 카테고리를 찾을 수 없습니다. 다음 수입 카테고리 중에서 선택하십시오:";
-            String msgZh = "找不到该类别。请从以下收入类别中选择：";
-            String reply = responseGenerator.t(language, msgVi, msgEn, msgJa, msgKo, msgZh);
+            pending.awaitingField = "CATEGORY";
+            String reply = responseGenerator.t(language,
+                    "Bạn muốn tạo mục tiêu thu nhập cho hạng mục nào?\n\nCác hạng mục hiện có:",
+                    "Which category do you want to set an income target for?\n\nAvailable categories:");
             reply += getCategoryListResponse(EntryType.INCOME, language);
+            reply += responseGenerator.t(language, "\n\nVí dụ: \"Mục tiêu [tên hạng mục] 10 triệu\"", "\n\nExample: \"Income goal [category] 10 million\"");
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
+        
+        // Store resolved category name
+        final Long finalCatId = catId;
+        String resolvedName = nameToId.entrySet().stream()
+                .filter(e -> e.getValue().equals(finalCatId))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(pending.category != null ? pending.category : parsed.getOriginalText());
+        pending.category = resolvedName;
 
-        // Validate that category is INCOME type
         EntryType catType = categoryRepository.findById(catId)
                 .map(Category::getType)
                 .orElse(null);
         if (catType == EntryType.EXPENSE) {
-            return AiAssistantResponse.builder().intent("ADVICE")
-                    .reply(responseGenerator.t(language,
-                            "Danh mục này thuộc loại CHI. Bạn hãy dùng \"Hạn mức [tên danh mục] [số tiền]\" để đặt ngân sách chi.",
-                            "This category is an EXPENSE type. Use \"Budget [category] [amount]\" to set an expense budget instead."))
-                    .build();
-        }
-
-        // Determine dates (default to current month)
-        LocalDate today = LocalDate.now();
-        LocalDate start = today.withDayOfMonth(1);
-        if (data.date != null) {
-            LocalDate parsedDate = parseDate(data.date, today);
-            if (parsedDate.isAfter(today)) {
-                start = parsedDate.withDayOfMonth(1);
+            // Safety: check if it's a real mention
+            boolean isExplicit = (parsed.getOriginalText().toLowerCase().contains(resolvedName.toLowerCase()));
+            if (!isExplicit) {
+                // False positive inference on trigger words like "tieu" in "muc tieu"
+                catId = null;
+                pending.category = null;
+                pending.awaitingField = "CATEGORY";
+                String reply = responseGenerator.t(language,
+                        "Bạn muốn tạo mục tiêu thu nhập cho hạng mục nào?\n\nCác hạng mục hiện có:",
+                        "Which category do you want to set an income target for?\n\nAvailable categories:");
+                reply += getCategoryListResponse(EntryType.INCOME, language);
+                reply += responseGenerator.t(language, "\n\nVí dụ: \"Mục tiêu [tên hạng mục] 10 triệu\"", "\n\nExample: \"Income goal [category] 10 million\"");
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+            } else {
+                pending.category = null; // Clear to trigger re-selection
+                pending.awaitingField = "CATEGORY";
+                String reply = responseGenerator.t(language,
+                        String.format("Hạng mục **'%s'** thuộc loại CHI. Vì bạn đang đặt mục tiêu thu nhập, hãy chọn một danh mục THU bên dưới:", resolvedName),
+                        String.format("The category **'%s'** is an EXPENSE type. Since you are setting an income target, please choose an INCOME category below:", resolvedName));
+                reply += getCategoryListResponse(EntryType.INCOME, language);
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
             }
         }
-        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
 
-        // Upsert budget (income target)
+        // Amount missing
+        if (pending.amount == null || pending.amount.compareTo(BigDecimal.ZERO) <= 0) {
+            // Attempt extraction from message
+            BigDecimal msgAmt = textPreprocessor.extractSingleAmount(parsed.getOriginalText());
+            if (msgAmt != null) {
+                pending.amount = msgAmt;
+            } else {
+                pending.awaitingField = "AMOUNT";
+                String catName = categoryService.getIdToNameMap().get(catId);
+                String reply = responseGenerator.t(language,
+                        "Bạn muốn đặt mục tiêu thu bao nhiêu cho " + catName + "?",
+                        "How much income goal do you want to set for " + catName + "?");
+                return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+            }
+        }
+
+        // CASE 2: Category + Amount detected but NO month -> ask which month
+        if (pending.month == null || pending.month.isBlank()) {
+            if (parsed.getStartDate() != null) {
+                pending.month = parsed.getStartDate().toString();
+            } else {
+                String lowerMessage = parsed.getOriginalText().toLowerCase();
+                if (lowerMessage.contains("tháng") || lowerMessage.contains("month") 
+                    || lowerMessage.matches(".*\\b(t1|t2|t3|t4|t5|t6|t7|t8|t9|t10|t11|t12)\\b.*")) {
+                    pending.month = parsed.getOriginalText();
+                } else {
+                    pending.awaitingField = "MONTH";
+                    String reply = responseGenerator.t(language,
+                            "Bạn muốn đặt mục tiêu này cho tháng nào?\n\nVí dụ:\ntháng này\ntháng 6\ntháng 12",
+                            "Which month do you want to set this goal for?\n\nExamples:\nthis month\nmonth 6\nmonth 12");
+                    return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
+                }
+            }
+        }
+
+        // Determine dates
+        LocalDate today = LocalDate.now();
+        LocalDate parsedDate = parseDate(pending.month, today);
+        LocalDate start = parsedDate.withDayOfMonth(1);
+        LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+        
+        String catName = categoryService.getIdToNameMap().get(catId);
+
+        // Is Confirmation?
+        boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation)) || isRuleBasedConfirmation(parsed.getNormalizedText());
+        if (!isConfirmation) {
+            pending.awaitingField = "CONFIRMATION";
+            // CASE 1: Propose creating the goal
+            String reply = responseGenerator.t(language,
+                    String.format("Bạn muốn tạo mục tiêu thu:\n\nTháng: %d/%d\nHạng mục: %s\nSố tiền: %s\n\nBạn có muốn lưu mục tiêu này không?",
+                            start.getMonthValue(), start.getYear(), catName, responseGenerator.formatVnd(pending.amount, language)),
+                    String.format("You want to create an income goal:\n\nMonth: %d/%d\nCategory: %s\nAmount: %s\n\nDo you want to save this goal?",
+                            start.getMonthValue(), start.getYear(), catName, responseGenerator.formatVnd(pending.amount, language)));
+            return AiAssistantResponse.builder().intent("CREATE_INCOME_GOAL").refreshRequired(false).reply(reply).build();
+        }
+
+        // Action confirmed: Upsert goal
         Optional<Budget> existing = budgetRepository
                 .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
                         userId, catId, start, end);
@@ -1236,18 +1494,19 @@ public class AiAssistantService {
         Budget budget = existing.orElse(new Budget());
         budget.setUserId(userId);
         budget.setCategoryId(catId);
-        budget.setAmount(data.amount);
+        budget.setAmount(pending.amount);
         budget.setStartDate(start);
         budget.setEndDate(end);
         budgetRepository.save(budget);
+        
+        planningState.remove(conversationId);
 
-        String catName = categoryService.getIdToNameMap().get(catId);
         String reply = responseGenerator.t(language,
                 String.format("Vâng, mình đã ghi nhận mục tiêu thu nhập cho danh mục **%s** là **%s** cho tháng %d/%d.",
-                        catName, responseGenerator.formatVnd(data.amount, language), start.getMonthValue(),
+                        catName, responseGenerator.formatVnd(pending.amount, language), start.getMonthValue(),
                         start.getYear()),
                 String.format("Okay, I've set a **%s** income target for **%s** for month %d/%d.",
-                        responseGenerator.formatVnd(data.amount, language), catName, start.getMonthValue(),
+                        responseGenerator.formatVnd(pending.amount, language), catName, start.getMonthValue(),
                         start.getYear()));
 
         return AiAssistantResponse.builder().intent("QUERY").refreshRequired(true).reply(reply).build();
@@ -1364,7 +1623,8 @@ public class AiAssistantService {
         return s.equals("ok") || s.equals("luu") || s.equals("dung")
                 || s.equals("dong y") || s.equals("yes") || s.equals("save")
                 || s.equals("confirm") || s.equals("chinh xac") || s.equals("duyet")
-                || s.equals("xac nhan");
+                || s.equals("xac nhan") || s.equals("co") || s.equals("vang")
+                || s.equals("u tru") || s.equals("chuan") || s.equals("uy") || s.equals("chot");
     }
 
     // ── Inner helper class ──

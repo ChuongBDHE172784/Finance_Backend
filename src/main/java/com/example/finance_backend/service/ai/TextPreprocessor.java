@@ -257,6 +257,28 @@ public class TextPreprocessor {
         if (normalizedText == null) return new LocalDate[]{null, null};
         LocalDate today = LocalDate.now();
 
+        // 1. Specific year detection
+        Matcher yearMatcher = Pattern.compile("\\b(nam|year)\\s+(\\d{4})\\b", Pattern.CASE_INSENSITIVE).matcher(normalizedText);
+        Integer forcedYear = null;
+        if (yearMatcher.find()) {
+            forcedYear = Integer.parseInt(yearMatcher.group(2));
+        }
+
+        // 2. Specific month (e.g., "thang 4", "thang 12", "month 6")
+        Matcher monthMatcher = Pattern.compile("\\b(thang|month|t)\\s*(\\d{1,2})\\b", Pattern.CASE_INSENSITIVE).matcher(normalizedText);
+        if (monthMatcher.find()) {
+            int month = Integer.parseInt(monthMatcher.group(2));
+            if (month >= 1 && month <= 12) {
+                int year = forcedYear != null ? forcedYear : today.getYear();
+                // If the month is for next year (e.g. today is Dec, user says Jan)
+                if (forcedYear == null && month < today.getMonthValue() && today.getMonthValue() >= 10) {
+                    year++;
+                }
+                LocalDate start = LocalDate.of(year, month, 1);
+                return new LocalDate[]{start, start.withDayOfMonth(start.lengthOfMonth())};
+            }
+        }
+
         // Today
         if (containsAny(normalizedText, "hom nay", "vua nay", "vua moi", "chieu nay",
                 "sang nay", "toi nay", "today", "this morning", "this afternoon",
@@ -293,6 +315,11 @@ public class TextPreprocessor {
         if (containsAny(normalizedText, "thang truoc", "last month", "previous month")) {
             LocalDate prev = today.minusMonths(1);
             return new LocalDate[]{prev.withDayOfMonth(1), prev.withDayOfMonth(prev.lengthOfMonth())};
+        }
+        // Next month
+        if (containsAny(normalizedText, "thang sau", "thang toi", "next month")) {
+            LocalDate next = today.plusMonths(1);
+            return new LocalDate[]{next.withDayOfMonth(1), next.withDayOfMonth(next.lengthOfMonth())};
         }
         // This year
         if (normalizedText.contains("nam nay") || normalizedText.contains("this year")) {

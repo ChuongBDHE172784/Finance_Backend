@@ -86,7 +86,7 @@ public class IntentDetectorTest {
 
     @Test
     void testAdviceIntent_English() {
-        IntentResult result = detector.detect(parse("how to save money"));
+        IntentResult result = detector.detect(parse("how to manage money"));
         assertEquals(Intent.FINANCIAL_ADVICE, result.getIntent());
     }
 
@@ -114,15 +114,15 @@ public class IntentDetectorTest {
 
     @Test
     void testBudgetIntent_Vietnamese() {
-        IntentResult result = detector.detect(parse("ngân sách ăn uống còn bao nhiêu"));
-        assertEquals(Intent.BUDGET_QUERY, result.getIntent());
+        IntentResult result = detector.detect(parse("xem kế hoạch tài chính"));
+        assertEquals(Intent.VIEW_FINANCIAL_PLAN, result.getIntent());
         assertTrue(result.getConfidence() >= 0.8);
     }
 
     @Test
     void testBudgetIntent_English() {
-        IntentResult result = detector.detect(parse("how is my budget"));
-        assertEquals(Intent.BUDGET_QUERY, result.getIntent());
+        IntentResult result = detector.detect(parse("show my financial plan"));
+        assertEquals(Intent.VIEW_FINANCIAL_PLAN, result.getIntent());
     }
 
     @Test

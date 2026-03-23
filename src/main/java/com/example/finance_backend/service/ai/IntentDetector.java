@@ -44,16 +44,22 @@ public class IntentDetector {
             "how to", "advice", "suggest", "recommend", "tips", "save money",
             "manage", "financial");
 
-    // ── BUDGET keywords ──
-    private static final List<String> BUDGET_KW = List.of(
-            "ngan sach", "budget", "han muc", "da dung", "con lai",
-            "vuot ngan sach", "over budget", "within budget");
+    // ── CREATE BUDGET keywords ──
+    private static final List<String> CREATE_BUDGET_KW = List.of(
+            "tao ngan sach", "lap ngan sach", "dat ngan sach", "dat han muc", "gioi han chi tieu",
+            "tao han muc", "set ngan sach", "budget cho", "ngan sach cho", "muon dat ngan sach", 
+            "giup toi tao ngan sach", "ngan sach", "han muc", "budget");
 
-    // ── INCOME TARGET keywords ──
-    private static final List<String> INCOME_TARGET_KW = List.of(
-            "muc tieu thu", "muc tieu", "income target", "income goal",
-            "target income", "goal income", "dat muc tieu",
-            "tien do thu", "revenue target", "revenue goal");
+    // ── CREATE INCOME GOAL keywords ──
+    private static final List<String> CREATE_INCOME_GOAL_KW = List.of(
+            "tao muc tieu", "dat muc tieu", "lap muc tieu", "muc tieu thu", "muc tieu thu nhap",
+            "muc tieu tai chinh", "muc tieu kiem tien", "muon dat muc tieu", "giup toi tao muc tieu",
+            "muc tieu luong", "freelance", "muc tieu kiem", "thu nhap", "muc tieu", "income goal");
+
+    // ── VIEW FINANCIAL PLAN keywords ──
+    private static final List<String> VIEW_PLAN_KW = List.of(
+            "xem ke hoach tai chinh", "ke hoach tai chinh", "ke hoach tai chinh cua toi", "xem ngan sach", 
+            "xem muc tieu", "thong ke ke hoach", "tong quan tai chinh", "financial plan", "show plan");
 
     // ── FINANCIAL SCORE keywords ──
     private static final List<String> SCORE_KW = List.of(
@@ -69,7 +75,8 @@ public class IntentDetector {
     // ── CONFIRM keywords (for draft confirmation) ──
     private static final List<String> CONFIRM_KW = List.of(
             "ok", "luu", "dung", "dong y", "chinh xac", "duyet", "xac nhan",
-            "yes", "save", "confirm", "approve", "correct");
+            "co", "vang", "u tru", "chuan", "uy", "chot", 
+            "yes", "save", "confirm", "approve", "correct", "yep", "yeah");
 
     /**
      * Detect intent using rule-based keyword matching.
@@ -117,27 +124,29 @@ public class IntentDetector {
                     .build();
         }
 
-        // Phase 4: Check INCOME TARGET (before BUDGET to avoid conflict)
-        if (matchesKeywords(normalized, INCOME_TARGET_KW)) {
-            // If it also has an amount, it's a SET intent
-            if (hasAmount) {
-                return IntentResult.builder()
-                        .intent(Intent.SET_INCOME_TARGET)
-                        .confidence(0.9)
-                        .source(Source.RULE)
-                        .build();
-            }
+        // Phase 4: Check VIEW FINANCIAL PLAN
+        if (matchesKeywords(normalized, VIEW_PLAN_KW) && !hasAmount) {
             return IntentResult.builder()
-                    .intent(Intent.BUDGET_QUERY)
+                    .intent(Intent.VIEW_FINANCIAL_PLAN)
+                    .confidence(0.9)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Phase 4.5: Check INCOME TARGET (before BUDGET to avoid conflict)
+        if (matchesKeywords(normalized, CREATE_INCOME_GOAL_KW)) {
+            // Because words like "muc tieu" are broad, check context
+            return IntentResult.builder()
+                    .intent(Intent.CREATE_INCOME_GOAL)
                     .confidence(0.85)
                     .source(Source.RULE)
                     .build();
         }
 
         // Phase 5: Check BUDGET
-        if (matchesKeywords(normalized, BUDGET_KW)) {
+        if (matchesKeywords(normalized, CREATE_BUDGET_KW)) {
             return IntentResult.builder()
-                    .intent(Intent.BUDGET_QUERY)
+                    .intent(Intent.CREATE_BUDGET)
                     .confidence(0.85)
                     .source(Source.RULE)
                     .build();

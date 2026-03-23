@@ -128,12 +128,14 @@ public class GeminiClientWrapper {
                 OUTPUT REQUIREMENTS:
                 - Return ONLY pure JSON, no markdown, no extra explanation.
                 - Use YYYY-MM-DD date format.
-                - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), SET_BUDGET (set an expense budget limit), SET_INCOME_TARGET (set an income target/goal).
-                - For SET_BUDGET: use entries[0] for categoryName and limit amount. Category MUST be EXPENSE type.
-                - For SET_INCOME_TARGET: use entries[0] for categoryName and target amount. Category MUST be INCOME type.
-                - "Budget" / "Expense Limit" = SET_BUDGET. "Goal" / "Income Target" = SET_INCOME_TARGET.
+                - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), CREATE_BUDGET (set an expense budget limit), CREATE_INCOME_GOAL (set an income target/goal), VIEW_FINANCIAL_PLAN (view budget and goals overview).
+                - For CREATE_BUDGET: use entries[0] for categoryName and limit amount. Category MUST be EXPENSE type.
+                - For CREATE_INCOME_GOAL: use entries[0] for categoryName and target amount. Category MUST be INCOME type.
+                - "Budget" / "Expense Limit" = CREATE_BUDGET. "Goal" / "Income Target" = CREATE_INCOME_GOAL.
+                - CRITICAL FOR BUDGET/GOAL: If the user explicitly mentions a month (e.g. 'tháng 6', 'tháng này', 'tháng tới', 'tháng 1'), extract it into entries[0].date in YYYY-MM-01 format. If NO month is mentioned, entries[0].date MUST be null.
+                - CRITICAL FOR CATEGORY: Only set `categoryName` if it is EXPLICITLY mentioned in the user message or detectable from the image. DO NOT guess or infer a category if the user didn't specify one. If no category is mentioned, set `categoryName` to null.
                 - If the intent involves an image of a purchase/payment, always set intent to "INSERT" and set isConfirmation to false.
-                - If the user explicitly confirms a previously proposed transaction (e.g., "yes", "save", "ok", "confirm"), set isConfirmation to true.
+                - If the user explicitly confirms a previously proposed transaction or financial plan (e.g., "yes", "save", "ok", "confirm", "lưu", "đồng ý"), set isConfirmation to true.
                 - If the user modifies a previously proposed transaction (e.g., "change amount to 50k"), set isConfirmation to false and update the entries.
                 - If the intent or message implies deleting multiple or all entries for a specific time/category (e.g., "delete all", "everything", "toàn bộ", "tất cả", "hết"), set target.deleteAll to true.
                 - **PENDING TRANSACTIONS RULE**: If the conversation history contains transactions that were proposed but NOT yet confirmed/saved, and the user adds NEW transactions, APPEND the new ones and return the FULL accumulated list in the "entries" array.
@@ -142,7 +144,7 @@ public class GeminiClientWrapper {
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "SET_BUDGET" | "SET_INCOME_TARGET" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "CREATE_BUDGET" | "CREATE_INCOME_GOAL" | "VIEW_FINANCIAL_PLAN" | "UNKNOWN",
                   "isConfirmation": boolean,
                   "adviceReply": "string (only for ADVICE)",
                   "query": {
@@ -172,9 +174,13 @@ public class GeminiClientWrapper {
                 }
 
                 EXAMPLES:
-                - [Image and "Set budget for food 5M"]: intent=SET_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống"}], isConfirmation=false
+                - [Image and "Set budget for food 5M"]: intent=CREATE_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống", date: null}], isConfirmation=false
+                - "ngân sách ăn uống 3 triệu tháng 6": intent=CREATE_BUDGET, entries=[{amount: 3000000, categoryName: "Ăn uống", date: "YYYY-06-01"}], isConfirmation=false
+                - "mục tiêu lương 20 triệu tháng này": intent=CREATE_INCOME_GOAL, entries=[{amount: 20000000, categoryName: "Lương", date: "YYYY-MM-01"}], isConfirmation=false
                 - [Receipt Image of a 50k Coffee]: intent=INSERT, entries=[{amount: 50000, categoryName: "Ăn uống", note: "Coffee"}], isConfirmation=false
                 - "Yes, save it" (after a 50k Coffee was proposed): intent=INSERT, entries=[{amount: 50000, ...}], isConfirmation=true
+                - "ok lưu ngân sách" (after a budget was proposed): intent=CREATE_BUDGET, entries=[{amount: 3000000, ...}], isConfirmation=true
+                - "xem kế hoạch tài chính": intent=VIEW_FINANCIAL_PLAN, isConfirmation=false
                 - "How can I save?": intent=ADVICE, adviceReply="...", isConfirmation=false
 
                 INPUT:

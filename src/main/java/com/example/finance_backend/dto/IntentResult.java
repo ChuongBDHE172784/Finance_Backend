@@ -22,10 +22,12 @@ public class IntentResult {
         MONTHLY_SUMMARY,
         FINANCIAL_SCORE,
         GENERAL_CHAT,
-        SET_BUDGET,
-        SET_INCOME_TARGET,
+        CREATE_BUDGET,
+        CREATE_INCOME_GOAL,
+        VIEW_FINANCIAL_PLAN,
         UNKNOWN
     }
+
 
     public enum Source {
         RULE, GEMINI
@@ -54,8 +56,9 @@ public class IntentResult {
             case MONTHLY_SUMMARY -> "QUERY";
             case FINANCIAL_SCORE -> "QUERY";
             case GENERAL_CHAT -> "ADVICE";
-            case SET_BUDGET -> "QUERY";
-            case SET_INCOME_TARGET -> "QUERY";
+            case CREATE_BUDGET -> "QUERY";
+            case CREATE_INCOME_GOAL -> "QUERY";
+            case VIEW_FINANCIAL_PLAN -> "QUERY";
             case UNKNOWN -> "UNKNOWN";
         };
     }
