@@ -3,7 +3,7 @@ package com.example.finance_backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "ai_messages")
@@ -34,11 +34,11 @@ public class AiMessage {
     private String imageUrl;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
         if (createdAt == null)
-            createdAt = Instant.now();
+            createdAt = LocalDateTime.now();
     }
 }
