@@ -128,7 +128,7 @@ public class AiAssistantService {
         switch (intentResult.getIntent()) {
             case INSERT_TRANSACTION:
                 response = handleInsert(message, parsed, geminiResult, request.getAccountId(),
-                        request.getUserId(), language);
+                        request.getUserId(), language, history);
                 break;
             case QUERY_TRANSACTION:
                 response = handleQuery(parsed, geminiResult, request.getUserId(), language);
@@ -173,7 +173,7 @@ public class AiAssistantService {
 
     private AiAssistantResponse handleInsert(String originalMessage, ParsedMessage parsed,
             GeminiParseResult gemini,
-            Long forcedAccountId, Long userId, String language) {
+            Long forcedAccountId, Long userId, String language, List<AiMessage> history) {
         // Extract transaction slots from Gemini or rules
         List<TransactionSlot> slots;
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
@@ -188,25 +188,10 @@ public class AiAssistantService {
             slots = entityExtractor.extractTransactionSlots(parsed);
         }
 
-        if (slots.isEmpty()) {
-            return AiAssistantResponse.builder()
-                    .intent("INSERT")
-                    .refreshRequired(false)
-                    .reply(responseGenerator.insertEmpty(language))
-                    .build();
-        }
-
-        // ── DRAFT WORKFLOW LOGIC ──
-        // Only save if Gemini explicitly confirmed it's a confirmation turn.
-        // Otherwise, present a draft to the user.
-        boolean isConfirmation = gemini != null && Boolean.TRUE.equals(gemini.isConfirmation);
-        if (!isConfirmation) {
-            List<GeminiParsedEntry> draftEntries;
-            if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
-                draftEntries = gemini.entries;
-            } else {
-                // Convert slots to GeminiParsedEntry for the DTO
-                draftEntries = slots.stream().map(s -> {
+        // ── DRAFT EXTRACTION & MERGING ──
+        List<GeminiParsedEntry> draftEntries = gemini != null && gemini.entries != null && !gemini.entries.isEmpty()
+                ? new ArrayList<>(gemini.entries)
+                : (slots.isEmpty() ? new ArrayList<>() : slots.stream().map(s -> {
                     GeminiParsedEntry e = new GeminiParsedEntry();
                     e.amount = s.getAmount();
                     e.categoryName = s.getCategoryName();
@@ -214,9 +199,32 @@ public class AiAssistantService {
                     e.type = s.getType();
                     e.date = s.getDate();
                     return e;
-                }).collect(Collectors.toList());
-            }
+                }).collect(Collectors.toList()));
 
+        // Recover previous drafts from history to ensure accumulation across turns
+        List<GeminiParsedEntry> previousDrafts = extractDraftEntriesFromHistory(history);
+        if (!previousDrafts.isEmpty()) {
+            for (GeminiParsedEntry prev : previousDrafts) {
+                boolean duplicate = draftEntries.stream().anyMatch(curr -> isSameEntry(curr, prev));
+                if (!duplicate) {
+                    draftEntries.add(0, prev); // Prepend to maintain order
+                }
+            }
+        }
+
+        // ── INTENT DECISION ──
+        boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation))
+                || isRuleBasedConfirmation(parsed.getNormalizedText());
+
+        if (draftEntries.isEmpty()) {
+            return AiAssistantResponse.builder()
+                    .intent("INSERT")
+                    .reply(responseGenerator.insertEmpty(language))
+                    .build();
+        }
+
+        // If NOT confirming, show draft
+        if (!isConfirmation) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
                     .isDraft(true)
@@ -225,20 +233,23 @@ public class AiAssistantService {
                     .build();
         }
 
-        // Check for missing slots — ask clarification
-        List<AiMessage> history = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(
-                parsed.getOriginalText()); // Will use conversationId properly in finalize
-        slots = contextManager.resolveWithContext(slots,
-                IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), parsed, history);
+        // If CONFIRMING, proceed to save (below)
 
-        String clarification = contextManager.detectClarificationNeeded(slots,
-                IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), language);
-        if (clarification != null) {
-            return AiAssistantResponse.builder()
-                    .intent("INSERT")
-                    .refreshRequired(false)
-                    .reply(clarification)
-                    .build();
+        // ── SAVE WORKFLOW (ONLY IF CONFIRMING) ──
+        // If it's NOT a confirmation turn, we might STILL need clarification for the NEW slots
+        if (!isConfirmation && !slots.isEmpty()) {
+            slots = contextManager.resolveWithContext(slots,
+                    IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), parsed, history);
+
+            String clarification = contextManager.detectClarificationNeeded(slots,
+                    IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), language);
+            if (clarification != null) {
+                return AiAssistantResponse.builder()
+                        .intent("INSERT")
+                        .refreshRequired(false)
+                        .reply(clarification)
+                        .build();
+            }
         }
 
         // Resolve account
@@ -281,7 +292,7 @@ public class AiAssistantService {
         List<String> errors = new ArrayList<>();
         int createdCount = 0;
 
-        for (TransactionSlot slot : slots) {
+        for (GeminiParsedEntry slot : draftEntries) {
             if (slot == null || slot.getAmount() == null || slot.getAmount().compareTo(BigDecimal.ZERO) <= 0)
                 continue;
 
@@ -616,9 +627,24 @@ public class AiAssistantService {
             targets = findTargetEntries(target);
         } else {
             targets = findTargetEntriesFromText(parsed);
-            String normalized = parsed.getNormalizedText();
-            deleteAll = normalized.contains("tat ca") || normalized.contains("het")
-                    || normalized.contains("all") || normalized.contains("everything");
+        }
+
+        // Safety layer: even if Gemini target exists, check for "delete all" keywords in the message
+        String normalized = parsed.getNormalizedText();
+        if (!deleteAll) {
+            deleteAll = normalized.contains("tat ca") || normalized.contains("toan bo")
+                    || normalized.contains("het") || normalized.contains("xoa het")
+                    || normalized.contains("all") || normalized.contains("everything")
+                    || normalized.contains("remove all") || normalized.contains("delete all");
+        }
+
+        // Special case: "cancel draft" instead of "delete from DB"
+        if (targets.isEmpty() && (normalized.contains("huy") || normalized.contains("lam lai") || normalized.contains("cancel") || normalized.contains("discard"))) {
+            // Check if there was a draft in history
+            return AiAssistantResponse.builder()
+                    .intent("DELETE")
+                    .reply(responseGenerator.t(language, "Đã hủy các giao dịch đang chờ.", "Pending transactions discarded."))
+                    .build();
         }
 
         if (targets.isEmpty()) {
@@ -760,7 +786,7 @@ public class AiAssistantService {
         // handleInsert
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
             return handleInsert(parsed.getOriginalText(), parsed, gemini,
-                    request.getAccountId(), request.getUserId(), language);
+                    request.getAccountId(), request.getUserId(), language, history);
         }
 
         // 2. Try to fill slots from conversation context (text-based)
@@ -772,7 +798,7 @@ public class AiAssistantService {
         boolean hasComplete = slots.stream().anyMatch(TransactionSlot::isComplete);
         if (hasComplete && parsed.hasAmounts()) {
             return handleInsert(parsed.getOriginalText(), parsed, null,
-                    request.getAccountId(), request.getUserId(), language);
+                    request.getAccountId(), request.getUserId(), language, history);
         }
 
         // 3. Ask clarification if we have partial info
@@ -1242,6 +1268,103 @@ public class AiAssistantService {
             sb.append("- ").append(c.getName()).append("\n");
         }
         return sb.toString();
+    }
+
+    // ── DRAFT EXTRACTION HELPERS ──
+
+    private List<GeminiParsedEntry> extractDraftEntriesFromHistory(List<AiMessage> history) {
+        if (history == null || history.isEmpty())
+            return new ArrayList<>();
+
+        // Look for the last Assistant message that was a draft
+        for (int i = history.size() - 1; i >= 0; i--) {
+            AiMessage m = history.get(i);
+            if ("ASSISTANT".equalsIgnoreCase(m.getRole())) {
+                String content = m.getContent();
+                if (content != null && (content.contains("kiểm tra lại") || content.contains("lưu giao dịch này không")
+                        || content.contains("review") || content.contains("save this transaction"))) {
+                    return parseDraftLines(content);
+                }
+            }
+        }
+        return new ArrayList<>();
+    }
+
+    private List<GeminiParsedEntry> parseDraftLines(String content) {
+        List<GeminiParsedEntry> result = new ArrayList<>();
+        String[] lines = content.split("\n");
+        for (String line : lines) {
+            line = line.trim();
+            if (line.startsWith("- ") || line.startsWith("+ ")) {
+                GeminiParsedEntry entry = parseDraftLine(line);
+                if (entry != null)
+                    result.add(entry);
+            }
+        }
+        return result;
+    }
+
+    private GeminiParsedEntry parseDraftLine(String line) {
+        try {
+            GeminiParsedEntry entry = new GeminiParsedEntry();
+            entry.type = line.startsWith("+") ? "INCOME" : "EXPENSE";
+
+            // Remove prefix (- or +)
+            String parts = line.substring(2).trim();
+
+            // Find amount and category: "30.000 đ • Ăn uống (Ăn phở)"
+            int dotIdx = parts.indexOf("•");
+            if (dotIdx == -1)
+                return null;
+
+            String amountPart = parts.substring(0, dotIdx).trim();
+            String categoryAndNote = parts.substring(dotIdx + 1).trim();
+
+            // Extract amount using textPreprocessor
+            entry.amount = textPreprocessor.extractSingleAmount(amountPart);
+            if (entry.amount == null)
+                return null;
+
+            // Extract category and note: "Ăn uống (Ăn phở)"
+            int bracketIdx = categoryAndNote.indexOf("(");
+            if (bracketIdx != -1) {
+                entry.categoryName = categoryAndNote.substring(0, bracketIdx).trim();
+                String note = categoryAndNote.substring(bracketIdx + 1).trim();
+                if (note.endsWith(")")) {
+                    note = note.substring(0, note.length() - 1);
+                }
+                entry.note = note;
+            } else {
+                entry.categoryName = categoryAndNote.trim();
+                entry.note = "";
+            }
+            return entry;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isSameEntry(GeminiParsedEntry a, GeminiParsedEntry b) {
+        if (a == null || b == null)
+            return false;
+        boolean amountEq = (a.amount != null && b.amount != null && a.amount.compareTo(b.amount) == 0);
+        boolean noteEq = (a.note != null ? a.note : "").equals(b.note != null ? b.note : "");
+        boolean catEq = (a.categoryName != null ? a.categoryName : "").equals(b.categoryName != null ? b.categoryName : "");
+        return amountEq && noteEq && catEq;
+    }
+
+    private boolean isRuleBasedConfirmation(String normalized) {
+        if (normalized == null || normalized.isBlank())
+            return false;
+        // Don't confirm if there are amounts (likely a new transaction)
+        if (normalized.matches(".*\\d+.*"))
+            return false;
+
+        String s = normalized.trim().toLowerCase();
+        return s.equals("ok") || s.equals("luu") || s.equals("dung")
+                || s.equals("dong y") || s.equals("yes") || s.equals("save")
+                || s.equals("confirm") || s.equals("chinh xac") || s.equals("duyet")
+                || s.equals("xac nhan");
     }
 
     // ── Inner helper class ──

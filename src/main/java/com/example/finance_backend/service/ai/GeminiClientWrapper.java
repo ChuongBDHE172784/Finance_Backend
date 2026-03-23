@@ -41,6 +41,9 @@ public class GeminiClientWrapper {
     @Value("${ai.gemini.model:gemini-flash-latest}")
     private String model;
 
+    @Value("${ai.gemini.api-key:}")
+    private String apiKeyFromProps;
+
     private Client client;
 
     public GeminiClientWrapper(CategoryService categoryService, ObjectMapper objectMapper) {
@@ -53,14 +56,14 @@ public class GeminiClientWrapper {
      * Returns null if parsing fails (caller should use rule-based fallback).
      */
     public GeminiParseResult parse(String message, String base64Image,
-                                    List<AiMessage> history, String language) {
+            List<AiMessage> history, String language) {
         try {
             LocalDate today = LocalDate.now();
             String categoriesStr = categoryService.findAll().stream()
                     .map(c -> c.getName())
                     .collect(Collectors.joining(", "));
             String historyBlock = formatHistory(history, language);
-            
+
             String prompt = buildPrompt(language, today, categoriesStr, historyBlock, message);
             GenerateContentResponse response;
 
@@ -71,7 +74,8 @@ public class GeminiClientWrapper {
             }
 
             String text = response.text();
-            if (text == null) return null;
+            if (text == null)
+                return null;
 
             String json = extractJson(text);
             ObjectMapper mapper = objectMapper.copy();
@@ -131,6 +135,9 @@ public class GeminiClientWrapper {
                 - If the intent involves an image of a purchase/payment, always set intent to "INSERT" and set isConfirmation to false.
                 - If the user explicitly confirms a previously proposed transaction (e.g., "yes", "save", "ok", "confirm"), set isConfirmation to true.
                 - If the user modifies a previously proposed transaction (e.g., "change amount to 50k"), set isConfirmation to false and update the entries.
+                - If the intent or message implies deleting multiple or all entries for a specific time/category (e.g., "delete all", "everything", "toàn bộ", "tất cả", "hết"), set target.deleteAll to true.
+                - **PENDING TRANSACTIONS RULE**: If the conversation history contains transactions that were proposed but NOT yet confirmed/saved, and the user adds NEW transactions, APPEND the new ones and return the FULL accumulated list in the "entries" array.
+                - If the user says "hủy", "xóa", "làm lại", or "bỏ giao dịch trước", set intent to "DELETE" and "target.deleteAll" to true to indicate a request to discard the pending list.
                 - %s
 
                 SCHEMA:
@@ -172,9 +179,9 @@ public class GeminiClientWrapper {
 
                 INPUT:
                 %s
-                """.formatted(langName, today.format(DATE_FMT), categories, history, adviceInstr, message);
+                """
+                .formatted(langName, today.format(DATE_FMT), categories, history, adviceInstr, message);
     }
-
 
     // ═════════════════════════════════════════════════════════
     // API HELPERS
@@ -207,14 +214,22 @@ public class GeminiClientWrapper {
     }
 
     private Client getClient() {
-        if (client != null) return client;
-        String apiKey = System.getenv("GOOGLE_API_KEY");
+        if (client != null)
+            return client;
+
+        String apiKey = apiKeyFromProps;
+        if (apiKey == null || apiKey.isBlank()) {
+            apiKey = System.getenv("GOOGLE_API_KEY");
+        }
         if (apiKey == null || apiKey.isBlank()) {
             apiKey = System.getenv("GEMINI_API_KEY");
         }
+
         if (apiKey != null && !apiKey.isBlank()) {
+            log.info("Initializing Gemini Client with API Key (from props or env)");
             client = Client.builder().apiKey(apiKey).build();
         } else {
+            log.warn("Gemini API Key is MISSING. Falling back to guest mode which might fail.");
             client = new Client();
         }
         return client;
@@ -246,7 +261,8 @@ public class GeminiClientWrapper {
     // RESPONSE DTOs (used for JSON deserialization)
     // ═════════════════════════════════════════════════════════
 
-    @Getter @Setter
+    @Getter
+    @Setter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GeminiParseResult {
         public String intent;
@@ -257,7 +273,8 @@ public class GeminiClientWrapper {
         public List<GeminiParsedEntry> entries;
     }
 
-    @Getter @Setter
+    @Getter
+    @Setter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GeminiParsedTarget {
         public BigDecimal amount;
@@ -267,7 +284,8 @@ public class GeminiClientWrapper {
         public Boolean deleteAll;
     }
 
-    @Getter @Setter
+    @Getter
+    @Setter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GeminiParsedQuery {
         public String metric;
@@ -278,7 +296,8 @@ public class GeminiClientWrapper {
         public String categoryName;
     }
 
-    @Getter @Setter
+    @Getter
+    @Setter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GeminiParsedEntry {
         public BigDecimal amount;

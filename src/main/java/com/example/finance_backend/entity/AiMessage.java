@@ -20,7 +20,7 @@ public class AiMessage {
 
     @Column(name = "conversation_id", nullable = false, length = 64)
     private String conversationId;
-    
+
     @Column(name = "user_id")
     private Long userId;
 
@@ -38,6 +38,7 @@ public class AiMessage {
 
     @PrePersist
     protected void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null)
+            createdAt = Instant.now();
     }
 }

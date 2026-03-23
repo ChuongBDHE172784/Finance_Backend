@@ -66,6 +66,11 @@ public class IntentDetector {
             "summary", "report", "insight", "analysis", "health",
             "tong ket", "monthly");
 
+    // ── CONFIRM keywords (for draft confirmation) ──
+    private static final List<String> CONFIRM_KW = List.of(
+            "ok", "luu", "dung", "dong y", "chinh xac", "duyet", "xac nhan",
+            "yes", "save", "confirm", "approve", "correct");
+
     /**
      * Detect intent using rule-based keyword matching.
      * Returns IntentResult with confidence score.
@@ -143,6 +148,15 @@ public class IntentDetector {
             return IntentResult.builder()
                     .intent(Intent.MONTHLY_SUMMARY)
                     .confidence(0.8)
+                    .source(Source.RULE)
+                    .build();
+        }
+        
+        // Phase 5.5: Check CONFIRM (for drafts)
+        if (matchesKeywords(normalized, CONFIRM_KW) && !hasAmount) {
+            return IntentResult.builder()
+                    .intent(Intent.INSERT_TRANSACTION)
+                    .confidence(0.9)
                     .source(Source.RULE)
                     .build();
         }
