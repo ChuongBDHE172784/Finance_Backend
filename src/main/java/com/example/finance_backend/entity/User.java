@@ -3,7 +3,7 @@ package com.example.finance_backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users", indexes = @Index(unique = true, columnList = "email"))
@@ -35,10 +35,10 @@ public class User {
     private boolean enabled = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = LocalDateTime.now();
     }
 }

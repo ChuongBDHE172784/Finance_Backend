@@ -92,12 +92,14 @@ public class TextPreprocessor {
     // ═════════════════════════════════════════════════════════
 
     public String detectLanguage(String requested, String message) {
+        if (containsVietnameseDiacritics(message)) return "vi";
+        
         if (requested != null && !requested.isBlank()) {
             String norm = requested.trim().toLowerCase(Locale.ROOT);
             if (norm.startsWith("en")) return "en";
             if (norm.startsWith("vi")) return "vi";
         }
-        if (containsVietnameseDiacritics(message)) return "vi";
+        
         if (message != null) {
             String lower = message.toLowerCase(Locale.ROOT);
             for (String kw : ENGLISH_KEYWORDS) {

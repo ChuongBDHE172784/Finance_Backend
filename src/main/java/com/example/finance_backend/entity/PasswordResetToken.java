@@ -3,7 +3,7 @@ package com.example.finance_backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -24,5 +24,5 @@ public class PasswordResetToken {
     private User user;
 
     @Column(nullable = false)
-    private Instant expiryDate;
+    private LocalDateTime expiryDate;
 }

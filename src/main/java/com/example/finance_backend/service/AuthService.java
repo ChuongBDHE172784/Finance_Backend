@@ -12,8 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -84,7 +83,7 @@ public class AuthService {
         VerificationToken verificationToken = VerificationToken.builder()
                 .token(code)
                 .user(user)
-                .expiryDate(Instant.now().plus(30, ChronoUnit.MINUTES))
+                .expiryDate(LocalDateTime.now().plusMinutes(30))
                 .build();
         
         verificationTokenRepository.save(verificationToken);
@@ -105,7 +104,7 @@ public class AuthService {
                 .filter(t -> t.getUser().getId().equals(user.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác nhận không đúng"));
 
-        if (token.getExpiryDate().isBefore(Instant.now())) {
+        if (token.getExpiryDate().isBefore(LocalDateTime.now())) {
             verificationTokenRepository.delete(token);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác nhận đã hết hạn");
         }
@@ -212,7 +211,7 @@ public class AuthService {
         PasswordResetToken resetToken = PasswordResetToken.builder()
                 .token(code)
                 .user(user)
-                .expiryDate(Instant.now().plus(30, ChronoUnit.MINUTES))
+                .expiryDate(LocalDateTime.now().plusMinutes(30))
                 .build();
 
         tokenRepository.save(resetToken);
@@ -229,7 +228,7 @@ public class AuthService {
         PasswordResetToken resetToken = tokenRepository.findByToken(code)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code không đúng, vui lòng kiểm tra lại"));
 
-        if (resetToken.getExpiryDate().isBefore(Instant.now())) {
+        if (resetToken.getExpiryDate().isBefore(LocalDateTime.now())) {
             tokenRepository.delete(resetToken);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã xác thực đã hết hạn");
         }

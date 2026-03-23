@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.text.NumberFormat;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -70,7 +72,19 @@ public class ResponseGenerator {
                         case "zh" -> " 元";
                         default -> " đ";
                 };
-                return NumberFormat.getInstance(locale).format(normalized) + suffix;
+
+                NumberFormat nf = NumberFormat.getInstance(locale);
+                // Enforce Vietnamese formatting symbols (dot for thousands, comma for decimals)
+                if (locale.equals(VI_LOCALE) || "vi".equals(language)) {
+                        if (nf instanceof DecimalFormat df) {
+                                DecimalFormatSymbols symbols = df.getDecimalFormatSymbols();
+                                symbols.setGroupingSeparator('.');
+                                symbols.setDecimalSeparator(',');
+                                df.setDecimalFormatSymbols(symbols);
+                        }
+                }
+
+                return nf.format(normalized) + suffix;
         }
 
         // ═════════════════════════════════════════════════════════

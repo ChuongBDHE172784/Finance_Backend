@@ -4,8 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "financial_entries")
@@ -67,10 +67,10 @@ public class FinancialEntry {
     private Long userId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = LocalDateTime.now();
     }
 }

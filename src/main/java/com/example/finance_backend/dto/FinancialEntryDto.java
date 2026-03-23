@@ -4,8 +4,8 @@ import com.example.finance_backend.entity.FinancialEntry;
 import lombok.*;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -31,7 +31,7 @@ public class FinancialEntryDto {
     private Long accountId;
     private Long toAccountId;
     private String source;
-    private Instant createdAt;
+    private LocalDateTime createdAt;
 
     public static FinancialEntryDto fromEntity(FinancialEntry e, String categoryName) {
         return FinancialEntryDto.builder()
