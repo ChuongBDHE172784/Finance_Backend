@@ -1,5 +1,7 @@
 package com.example.finance_backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -12,6 +14,7 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Account {
 
     @Id
@@ -36,5 +39,6 @@ public class Account {
 
     @Column(name = "is_deleted", nullable = false)
     @Builder.Default
+    @JsonProperty("isDeleted")
     private boolean isDeleted = false;
 }
