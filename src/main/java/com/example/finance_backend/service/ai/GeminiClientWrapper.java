@@ -25,9 +25,9 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
- * Isolated Gemini API wrapper. Handles prompt construction, API calls,
- * response parsing, and multimodal (image) support.
- * Never exposes raw API errors to users.
+ * Trình bao bọc Gemini API riêng biệt. Xử lý việc xây dựng prompt, gọi API,
+ * phân tích phản hồi, và hỗ trợ đa phương thức (hình ảnh).
+ * Không bao giờ để người dùng thấy các lỗi API thô.
  */
 @Component
 public class GeminiClientWrapper {
@@ -52,8 +52,10 @@ public class GeminiClientWrapper {
     }
 
     /**
-     * Parses a user message using Gemini API. Returns the structured parse result.
-     * Returns null if parsing fails (caller should use rule-based fallback).
+     * Phân tích tin nhắn của người dùng bằng Gemini API. Trả về kết quả phân tích
+     * có cấu trúc.
+     * Trả về null nếu phân tích thất bại (người gọi nên sử dụng dự phòng dựa trên
+     * quy tắc).
      */
     public GeminiParseResult parse(String message, String base64Image,
             List<AiMessage> history, String language) {
@@ -88,11 +90,11 @@ public class GeminiClientWrapper {
     }
 
     // ═════════════════════════════════════════════════════════
-    // PROMPT CONSTRUCTION
+    // XÂY DỰNG PROMPT
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Builds a localized prompt for Gemini.
+     * Xây dựng một prompt được bản địa hóa cho Gemini.
      */
     public String buildPrompt(String language, LocalDate today, String categories, String history, String message) {
         String langName = switch (language) {
@@ -190,7 +192,7 @@ public class GeminiClientWrapper {
     }
 
     // ═════════════════════════════════════════════════════════
-    // API HELPERS
+    // PHƯƠNG THỨC HỖ TRỢ API
     // ═════════════════════════════════════════════════════════
 
     private GenerateContentResponse callMultimodal(String prompt, String base64Image) throws Exception {
@@ -207,7 +209,7 @@ public class GeminiClientWrapper {
         Part textPart = Part.builder().text(prompt).build();
         Part imagePart = Part.builder()
                 .inlineData(Blob.builder()
-                        .data(java.util.Base64.getDecoder().decode(data))
+                        .data(java.util.Base64.getDecoder().decode(data)) // Giải mã Base64 thành byte[]
                         .mimeType(mimeType)
                         .build())
                 .build();
@@ -264,7 +266,7 @@ public class GeminiClientWrapper {
     }
 
     // ═════════════════════════════════════════════════════════
-    // RESPONSE DTOs (used for JSON deserialization)
+    // DTO PHẢN HỒI (được sử dụng để giải mã JSON)
     // ═════════════════════════════════════════════════════════
 
     @Getter

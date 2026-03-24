@@ -11,9 +11,9 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * Manages conversation context for multi-turn interactions.
- * Handles: slot filling from history, clarification detection,
- * and ambiguous reference resolution.
+ * Quản lý ngữ cảnh hội thoại cho các tương tác nhiều lượt.
+ * Xử lý: điền thông tin còn thiếu từ lịch sử, phát hiện nhu cầu làm rõ,
+ * và giải quyết các tham chiếu mơ hồ.
  */
 @Component
 public class ConversationContextManager {
@@ -27,9 +27,9 @@ public class ConversationContextManager {
     }
 
     /**
-     * Attempts to fill missing slots using conversation history.
-     * Example: User says "ăn trưa", bot asks "bao nhiêu?", user says "45k"
-     * → fills the amount slot from the follow-up "45k".
+     * Cố gắng điền các thông tin (slots) còn thiếu bằng cách sử dụng lịch sử hội thoại.
+     * Ví dụ: Người dùng nói "ăn trưa", bot hỏi "bao nhiêu?", người dùng nói "45k"
+     * → điền thông tin số tiền từ câu trả lời "45k".
      */
     public List<TransactionSlot> resolveWithContext(List<TransactionSlot> slots,
                                                      IntentResult intent,
@@ -37,24 +37,24 @@ public class ConversationContextManager {
                                                      List<AiMessage> history) {
         if (history == null || history.isEmpty()) return slots;
 
-        // If current message is very short (likely a follow-up answer),
-        // try to combine with previous context
+        // Nếu tin nhắn hiện tại rất ngắn (có khả năng là câu trả lời tiếp theo),
+        // hãy thử kết hợp với ngữ cảnh trước đó
         if (shouldUseHistory(currentMessage, slots)) {
             String lastUserMsg = getLastUserMessage(history);
             if (lastUserMsg != null && !lastUserMsg.isBlank()) {
-                // Merge context: previous note + current amount
+                // Kết hợp ngữ cảnh: ghi chú trước đó + số tiền hiện tại
                 for (int i = 0; i < slots.size(); i++) {
                     TransactionSlot slot = slots.get(i);
                     if (slot.getAmount() != null && (slot.getNote() == null || slot.getNote().isBlank()
                             || slot.getNote().length() <= 5)) {
-                        // Current message has amount but no meaningful note → take note from history
+                        // Tin nhắn hiện tại có số tiền nhưng không có ghi chú ý nghĩa → lấy ghi chú từ lịch sử
                         slot.setNote(lastUserMsg.trim());
                         String normalized = textPreprocessor.normalizeVietnamese(lastUserMsg);
                         if (slot.getCategoryName() == null) {
                             slot.setCategoryName(entityExtractor.inferCategory(normalized));
                         }
                     } else if (slot.getAmount() == null && slot.getNote() != null) {
-                        // Current message has note but no amount → try extracting from history
+                        // Tin nhắn hiện tại có ghi chú nhưng không có số tiền → thử trích xuất từ lịch sử
                         BigDecimal historyAmount = textPreprocessor.extractSingleAmount(lastUserMsg);
                         if (historyAmount != null) {
                             slot.setAmount(historyAmount);
@@ -67,8 +67,8 @@ public class ConversationContextManager {
     }
 
     /**
-     * Checks if the current message needs a clarification question.
-     * Returns a clarification question string, or null if not needed.
+     * Kiểm tra xem tin nhắn hiện tại có cần câu hỏi làm rõ hay không.
+     * Trả về chuỗi câu hỏi làm rõ, hoặc null nếu không cần thiết.
      */
     public String detectClarificationNeeded(List<TransactionSlot> slots, IntentResult intent, String language) {
         if (intent.getIntent() != Intent.INSERT_TRANSACTION) return null;
@@ -90,8 +90,8 @@ public class ConversationContextManager {
     }
 
     /**
-     * Resolves ambiguous references like "xóa cái đó", "sửa cái hồi nãy".
-     * Returns keywords extracted from the last relevant context message.
+     * Giải quyết các tham chiếu mơ hồ như "xóa cái đó", "sửa cái hồi nãy".
+     * Trả về các từ khóa được trích xuất từ tin nhắn ngữ cảnh có liên quan cuối cùng.
      */
     public String resolveAmbiguousReference(String normalizedText, List<AiMessage> history) {
         if (history == null || history.isEmpty()) return null;
@@ -102,7 +102,7 @@ public class ConversationContextManager {
 
         if (!isAmbiguous) return null;
 
-        // Look for the last assistant message that mentions a transaction
+        // Tìm tin nhắn cuối cùng của trợ lý có đề cập đến một giao dịch
         for (int i = history.size() - 1; i >= 0; i--) {
             AiMessage msg = history.get(i);
             if ("ASSISTANT".equalsIgnoreCase(msg.getRole())) {
@@ -114,22 +114,22 @@ public class ConversationContextManager {
             }
         }
 
-        // Fall back to last user message
+        // Dự phòng bằng tin nhắn cuối cùng của người dùng
         String lastUser = getLastUserMessage(history);
         return lastUser;
     }
 
     // ═════════════════════════════════════════════════════════
-    // PRIVATE HELPERS
+    // CÁC PHƯƠNG THỨC HỖ TRỢ RIÊNG
     // ═════════════════════════════════════════════════════════
 
     private boolean shouldUseHistory(ParsedMessage current, List<TransactionSlot> slots) {
-        // Short messages (likely follow-up answers) or messages with amount but no note
+        // Các tin nhắn ngắn (có khả năng là câu trả lời tiếp theo) hoặc các tin nhắn có số tiền nhưng không có ghi chú
         String text = current.getNormalizedText();
         if (text == null) return false;
         if (text.length() <= 12) return true;
 
-        // Has amount but no meaningful note → probably answering a "how much?" question
+        // Có số tiền nhưng không có ghi chú ý nghĩa → có khả năng đang trả lời câu hỏi "bao nhiêu tiền?"
         boolean hasAmountOnly = current.hasAmounts()
                 && slots.stream().allMatch(s -> s.getNote() == null || s.getNote().length() <= 5);
         if (hasAmountOnly) return true;

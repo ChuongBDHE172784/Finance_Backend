@@ -17,10 +17,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Generates natural language responses in Vietnamese and English.
- * Handles currency formatting, clarification templates, confirmation messages,
- * financial summary formatting, budget status, score reports, and smart
- * suggestions.
+ * Tạo các phản hồi bằng ngôn ngữ tự nhiên bằng tiếng Việt và tiếng Anh.
+ * Xử lý định dạng tiền tệ, mẫu câu hỏi làm rõ, tin nhắn xác nhận,
+ * định dạng tóm tắt tài chính, trạng thái ngân sách, báo cáo điểm, và các
+ * gợi ý thông minh.
  */
 @Component
 public class ResponseGenerator {
@@ -29,7 +29,7 @@ public class ResponseGenerator {
         private static final Locale VI_LOCALE = new Locale("vi", "VN");
 
         // ═════════════════════════════════════════════════════════
-        // TRANSLATION HELPER
+        // PHƯƠNG THỨC HỖ TRỢ DỊCH
         // ═════════════════════════════════════════════════════════
 
         public String t(String language, String vi, String en) {
@@ -53,7 +53,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // CURRENCY FORMATTING
+        // ĐÍNH DẠNG TIỀN TỆ
         // ═════════════════════════════════════════════════════════
 
         public String formatVnd(BigDecimal value, String language) {
@@ -88,7 +88,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // INSERT RESPONSES
+        // PHẢN HỒI KHI THÊM GIAO DỊCH
         // ═════════════════════════════════════════════════════════
 
         public String insertSuccess(int count, java.util.List<String> details, String language) {
@@ -143,7 +143,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // QUERY RESPONSES
+        // PHẢN HỒI KHI TRUY VẤN
         // ═════════════════════════════════════════════════════════
 
         public String totalReply(LocalDate start, LocalDate end, BigDecimal total, String typeLabel, String language) {
@@ -225,7 +225,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // UPDATE / DELETE RESPONSES
+        // PHẢN HỒI KHI CẬP NHẬT / XÓA
         // ═════════════════════════════════════════════════════════
 
         public String updateSuccess(BigDecimal amount, String note, String language) {
@@ -276,14 +276,14 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // BUDGET STATUS RESPONSES
+        // PHẢN HỒI TRẠNG THÁI NGÂN SÁCH
         // ═════════════════════════════════════════════════════════
 
         public String budgetStatusReply(BudgetStatusResult status, String language) {
                 if ("INCOME_TARGET".equals(status.getPlanType())) {
-                        // Income target logic
+                        // Logic cho mục tiêu thu nhập
                         if (status.isOverBudget()) {
-                                // "overBudget" means "achieved" for income targets
+                                // "overBudget" nghĩa là "đã đạt được" đối với mục tiêu thu nhập
                                 return t(language,
                                                 String.format("🎉 Tuyệt vời! Bạn đã đạt mục tiêu thu từ %s! (Mục tiêu: %s, Đã thu: %s — %s%%)",
                                                                 status.getCategoryName(),
@@ -334,7 +334,7 @@ public class ResponseGenerator {
                                                         formatVnd(status.getBudgetAmount(), language)));
                 }
 
-                // Expense budget logic
+                // Logic cho ngân sách chi tiêu
                 if (status.isOverBudget()) {
                         return t(language,
                                         String.format("⚠️ Bạn đã vượt ngân sách %s %s! (Ngân sách: %s, Đã chi: %s — %s%%)",
@@ -395,7 +395,7 @@ public class ResponseGenerator {
                 StringBuilder sb = new StringBuilder();
                 sb.append(t(language, "📋 Kế hoạch tài chính:\n", "📋 Financial Plan:\n"));
 
-                // Separate expense budgets and income targets
+                // Tách biệt ngân sách chi tiêu và mục tiêu thu nhập
                 List<BudgetStatusResult> expenseBudgets = statuses.stream()
                                 .filter(s -> "EXPENSE_BUDGET".equals(s.getPlanType()))
                                 .collect(java.util.stream.Collectors.toList());
@@ -442,7 +442,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // OVERSPENDING ALERT RESPONSES
+        // PHẢN HỒI CẢNH BÁO CHI TIÊU QUÁ MỨC
         // ═════════════════════════════════════════════════════════
 
         public String overspendingAlertReply(List<OverspendingAlert> alerts, String language) {
@@ -468,7 +468,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // MONTHLY SUMMARY RESPONSES
+        // PHẢN HỒI TÓM TẮT HÀNG THÁNG
         // ═════════════════════════════════════════════════════════
 
         public String monthlySummaryReply(MonthlySummaryResult summary, int month, int year, String language) {
@@ -485,7 +485,7 @@ public class ResponseGenerator {
                                                 formatVnd(summary.getTotalExpense(), language))
                                 : String.format("💸 Tổng chi: %s\n", formatVnd(summary.getTotalExpense(), language)));
 
-                // Trend vs previous month
+                // Xu hướng so với tháng trước
                 if (!"STABLE".equals(summary.getTrendDirection())) {
                         String arrow = "UP".equals(summary.getTrendDirection()) ? "📈" : "📉";
                         sb.append(isEnglish(language)
@@ -495,7 +495,7 @@ public class ResponseGenerator {
                                                         summary.getTrendPercent().abs()));
                 }
 
-                // Category breakdown
+                // Phân bổ theo danh mục
                 if (summary.getCategoryBreakdowns() != null && !summary.getCategoryBreakdowns().isEmpty()) {
                         sb.append(t(language, "\n📂 Phân bổ chi tiêu:\n", "\n📂 Spending Breakdown:\n"));
                         for (CategoryPercentage cp : summary.getCategoryBreakdowns()) {
@@ -508,7 +508,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // FINANCIAL HEALTH RESPONSES
+        // PHẢN HỒI SỨC KHỎE TÀI CHÍNH
         // ═════════════════════════════════════════════════════════
 
         public String financialHealthReply(FinancialHealthResult health, String language) {
@@ -530,7 +530,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // WEEKLY PATTERN RESPONSES
+        // PHẢN HỒI QUY LUẬT CHI TIÊU HÀNG TUẦN
         // ═════════════════════════════════════════════════════════
 
         public String weeklyPatternReply(WeeklyPatternResult pattern, String language) {
@@ -557,7 +557,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // SMART SUGGESTION RESPONSES
+        // PHẢN HỒI GỢI Ý THÔNG MINH
         // ═════════════════════════════════════════════════════════
 
         public String smartSuggestionReply(List<SmartSuggestionResult> suggestions, String language) {
@@ -581,7 +581,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // FINANCIAL SCORE RESPONSES
+        // PHẢN HỒI ĐIỂM TÀI CHÍNH
         // ═════════════════════════════════════════════════════════
 
         public String financialScoreReply(FinancialScoreResult score, String language) {
@@ -621,7 +621,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // GENERIC / ERROR RESPONSES
+        // PHẢN HỒI CHUNG / LỖI
         // ═════════════════════════════════════════════════════════
 
         public String unknownMessage(String language) {
@@ -660,7 +660,7 @@ public class ResponseGenerator {
                                 "Which wallet should I use for this transaction?");
         }
 
-        /** Trim note for display (max 80 chars). */
+        /** Cắt ngắn ghi chú để hiển thị (tối đa 80 ký tự). */
         public String trimNote(String note) {
                 if (note == null)
                         return "";
@@ -669,7 +669,7 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // PRIVATE HELPERS
+        // PHƯƠNG THỨC HỖ TRỢ RIÊNG
         // ═════════════════════════════════════════════════════════
 
         private String translateDayOfWeek(DayOfWeek day, String language) {

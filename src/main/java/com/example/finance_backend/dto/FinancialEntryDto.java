@@ -29,11 +29,13 @@ public class FinancialEntryDto {
     private Double longitude;
     private String type;
     private Long accountId;
+    private String accountName;
     private Long toAccountId;
+    private String toAccountName;
     private String source;
     private LocalDateTime createdAt;
 
-    public static FinancialEntryDto fromEntity(FinancialEntry e, String categoryName) {
+    public static FinancialEntryDto fromEntity(FinancialEntry e, String categoryName, String accountName, String toAccountName) {
         return FinancialEntryDto.builder()
                 .id(e.getId())
                 .amount(e.getAmount())
@@ -47,8 +49,10 @@ public class FinancialEntryDto {
                 .latitude(e.getLatitude())
                 .longitude(e.getLongitude())
                 .type(e.getType() != null ? e.getType().name() : "EXPENSE")
-                .accountId(e.getAccountId() != null ? e.getAccountId() : 1L)
+                .accountId(e.getAccountId())
+                .accountName(accountName)
                 .toAccountId(e.getToAccountId())
+                .toAccountName(toAccountName)
                 .source(e.getSource() != null ? e.getSource().name() : null)
                 .createdAt(e.getCreatedAt())
                 .build();

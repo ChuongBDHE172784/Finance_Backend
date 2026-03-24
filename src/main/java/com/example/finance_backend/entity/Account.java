@@ -33,4 +33,8 @@ public class Account {
 
     @Column(name = "user_id")
     private Long userId;
+
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private boolean isDeleted = false;
 }

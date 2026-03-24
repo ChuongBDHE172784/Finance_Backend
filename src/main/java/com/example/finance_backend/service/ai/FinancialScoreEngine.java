@@ -13,13 +13,13 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Computes a 0–100 Financial Health Score from 4 weighted dimensions:
- *   Savings Rate       (30%)
- *   Spending Stability (25%)
- *   Budget Adherence   (25%)
- *   Income Consistency (20%)
+ * Tính toán Điểm Sức khỏe Tài chính từ 0–100 dựa trên 4 khía cạnh có trọng số:
+ *   Tỷ lệ tiết kiệm        (30%)
+ *   Sự ổn định chi tiêu    (25%)
+ *   Tuân thủ ngân sách     (25%)
+ *   Sự nhất quán thu nhập  (20%)
  *
- * Grade mapping: A (≥85), B (≥70), C (≥55), D (≥40), F (<40).
+ * Phân loại hạng: A (≥85), B (≥70), C (≥55), D (≥40), F (<40).
  */
 @Service
 public class FinancialScoreEngine {
@@ -42,7 +42,7 @@ public class FinancialScoreEngine {
     }
 
     // ═════════════════════════════════════════════════════════
-    // MAIN SCORE COMPUTATION
+    // TÍNH TOÁN ĐIỂM CHÍNH
     // ═════════════════════════════════════════════════════════
 
     public FinancialScoreResult computeScore(Long userId, int month, int year) {
@@ -65,8 +65,8 @@ public class FinancialScoreEngine {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DIMENSION 1: SAVINGS RATE (0–30 pts)
-    // 0% savings → 0 pts, ≥20% savings → 30 pts, linear between
+    // KHÍ CẠNH 1: TỶ LỆ TIẾT KIỆM (0–30 điểm)
+    // 0% tiết kiệm → 0 điểm, ≥20% tiết kiệm → 30 điểm, tính tuyến tính ở giữa
     // ═════════════════════════════════════════════════════════
 
     int computeSavingsRateScore(Long userId, LocalDate start, LocalDate end) {
@@ -74,7 +74,7 @@ public class FinancialScoreEngine {
         BigDecimal expense = analyticsService.getTotalSpendingForUser(userId, start, end, EntryType.EXPENSE);
 
         if (income.compareTo(BigDecimal.ZERO) <= 0) {
-            // No income recorded — give neutral score
+            // Không có thu nhập được ghi nhận — đưa ra số điểm trung tính
             return expense.compareTo(BigDecimal.ZERO) == 0 ? 15 : 0;
         }
 
@@ -83,14 +83,14 @@ public class FinancialScoreEngine {
         if (savingsRatio <= 0) return 0;
         if (savingsRatio >= 0.20) return WEIGHT_SAVINGS;
 
-        // Linear interpolation: ratio/0.20 * 30
+        // Nội suy tuyến tính: tỷ lệ/0.20 * 30
         return (int) Math.round((savingsRatio / 0.20) * WEIGHT_SAVINGS);
     }
 
     // ═════════════════════════════════════════════════════════
-    // DIMENSION 2: SPENDING STABILITY (0–25 pts)
-    // Coefficient of variation (std/mean) of daily spending
-    // CV=0 → 25 pts, CV≥1.0 → 0 pts, linear between
+    // KHÍ CẠNH 2: SỰ ỔN ĐỊNH CHI TIÊU (0–25 điểm)
+    // Hệ số biến thiên (std/mean) của chi tiêu hàng ngày
+    // CV=0 → 25 điểm, CV≥1.0 → 0 điểm, tính tuyến tính ở giữa
     // ═════════════════════════════════════════════════════════
 
     int computeSpendingStabilityScore(Long userId, LocalDate start, LocalDate end) {
@@ -98,15 +98,15 @@ public class FinancialScoreEngine {
                 .findAmountsByUserAndTypeAndDateRange(userId, EntryType.EXPENSE, start, end);
 
         if (amounts == null || amounts.size() < 2) {
-            return amounts != null && amounts.size() == 1 ? 20 : 15; // neutral
+            return amounts != null && amounts.size() == 1 ? 20 : 15; // trung tính
         }
 
-        // Compute mean
+        // Tính giá trị trung bình (mean)
         BigDecimal sum = amounts.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal mean = sum.divide(new BigDecimal(amounts.size()), 10, RoundingMode.HALF_UP);
         if (mean.compareTo(BigDecimal.ZERO) <= 0) return WEIGHT_STABILITY;
 
-        // Compute variance
+        // Tính phương sai (variance)
         BigDecimal variance = BigDecimal.ZERO;
         for (BigDecimal a : amounts) {
             BigDecimal diff = a.subtract(mean);
@@ -114,7 +114,7 @@ public class FinancialScoreEngine {
         }
         variance = variance.divide(new BigDecimal(amounts.size()), 10, RoundingMode.HALF_UP);
 
-        // Std deviation
+        // Độ lệch chuẩn (Std deviation)
         double std = Math.sqrt(variance.doubleValue());
         double cv = std / mean.doubleValue();
 
@@ -126,16 +126,16 @@ public class FinancialScoreEngine {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DIMENSION 3: BUDGET ADHERENCE (0–25 pts)
-    // % of budgets NOT exceeded → full 25 pts
-    // 0 budgets set → neutral 15 pts
+    // KHÍ CẠNH 3: TUÂN THỦ NGÂN SÁCH (0–25 điểm)
+    // % ngân sách CHƯA vượt quá → trọn vẹn 25 điểm
+    // 0 ngân sách được thiết lập → trung tính 15 điểm
     // ═════════════════════════════════════════════════════════
 
     int computeBudgetAdherenceScore(Long userId, LocalDate start, LocalDate end) {
         List<Budget> budgets = budgetRepository
                 .findByUserIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(userId, end, start);
 
-        if (budgets.isEmpty()) return 15; // neutral — no budgets configured
+        if (budgets.isEmpty()) return 15; // trung tính — không có ngân sách nào được cấu hình
 
         int withinBudget = 0;
         for (Budget b : budgets) {
@@ -152,9 +152,9 @@ public class FinancialScoreEngine {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DIMENSION 4: INCOME CONSISTENCY (0–20 pts)
-    // Compares current month income with previous month
-    // Both have income → compare regularity; no data → neutral
+    // KHÍ CẠNH 4: SỰ NHẤT QUÁN THU NHẬP (0–20 điểm)
+    // So sánh thu nhập tháng hiện tại với tháng trước
+    // Cả hai đều có thu nhập → so sánh tính đều đặn; không có dữ liệu → trung tính
     // ═════════════════════════════════════════════════════════
 
     int computeIncomeConsistencyScore(Long userId, LocalDate start, LocalDate end) {
@@ -164,27 +164,27 @@ public class FinancialScoreEngine {
         LocalDate prevEnd = prevStart.withDayOfMonth(prevStart.lengthOfMonth());
         BigDecimal prevIncome = analyticsService.getTotalSpendingForUser(userId, prevStart, prevEnd, EntryType.INCOME);
 
-        // No income data at all → neutral
+        // Hoàn toàn không có dữ liệu thu nhập → trung tính
         if (currentIncome.compareTo(BigDecimal.ZERO) <= 0 && prevIncome.compareTo(BigDecimal.ZERO) <= 0) {
             return 10;
         }
-        // Only one month has income → partial
+        // Chỉ có một tháng có thu nhập → một phần
         if (prevIncome.compareTo(BigDecimal.ZERO) <= 0) return 12;
         if (currentIncome.compareTo(BigDecimal.ZERO) <= 0) return 5;
 
-        // Both months have income — measure consistency
+        // Cả hai tháng đều có thu nhập — đo lường sự nhất quán
         BigDecimal diff = currentIncome.subtract(prevIncome).abs();
         double variationRatio = diff.doubleValue() / prevIncome.doubleValue();
 
-        if (variationRatio <= 0.1) return WEIGHT_INCOME;  // Very consistent
-        if (variationRatio >= 0.5) return 5;               // Very inconsistent
+        if (variationRatio <= 0.1) return WEIGHT_INCOME;  // Rất nhất quán
+        if (variationRatio >= 0.5) return 5;               // Rất không nhất quán
 
         // Linear: (0.5 - ratio) / 0.4 * 20
         return (int) Math.round(((0.5 - variationRatio) / 0.4) * WEIGHT_INCOME);
     }
 
     // ═════════════════════════════════════════════════════════
-    // HELPERS
+    // PHƯƠNG THỨC HỖ TRỢ
     // ═════════════════════════════════════════════════════════
 
     private BigDecimal computeActualSavingsRate(Long userId, LocalDate start, LocalDate end) {
@@ -204,7 +204,7 @@ public class FinancialScoreEngine {
     }
 
     // ═════════════════════════════════════════════════════════
-    // RESULT DTO
+    // DTO KẾT QUẢ
     // ═════════════════════════════════════════════════════════
 
     @Getter
@@ -215,7 +215,7 @@ public class FinancialScoreEngine {
         private final int stabilityScore;         // 0-25
         private final int budgetAdherenceScore;   // 0-25
         private final int incomeConsistencyScore; // 0-20
-        private final BigDecimal savingsRate;     // actual % for display
+        private final BigDecimal savingsRate;     // tỷ lệ % thực tế để hiển thị
         private final String grade;               // A/B/C/D/F
     }
 }

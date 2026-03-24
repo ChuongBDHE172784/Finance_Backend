@@ -164,7 +164,7 @@ public class AiAssistantServiceTest {
                 // Mock account resolution
                 com.example.finance_backend.entity.Account account = com.example.finance_backend.entity.Account
                                 .builder().id(1L).userId(1L).build();
-                when(accountRepository.findByUserIdOrderByNameAsc(any())).thenReturn(List.of(account));
+                when(accountRepository.findByUserIdAndIsDeletedFalseOrderByNameAsc(any())).thenReturn(List.of(account));
                 when(categoryService.getIdToNameMap()).thenReturn(java.util.Map.of(1L, "Ăn uống"));
 
                 // Mock entry service

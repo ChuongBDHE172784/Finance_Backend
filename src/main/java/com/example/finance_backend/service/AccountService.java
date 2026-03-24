@@ -13,12 +13,11 @@ import java.util.List;
 public class AccountService {
 
     private final AccountRepository accountRepository;
-    private final com.example.finance_backend.repository.FinancialEntryRepository entryRepository;
 
     @Transactional(readOnly = true)
     public List<Account> findAll(Long userId) {
         if (userId == null) return List.of();
-        return accountRepository.findByUserIdOrderByNameAsc(userId);
+        return accountRepository.findByUserIdAndIsDeletedFalseOrderByNameAsc(userId);
     }
 
     @Transactional
@@ -34,6 +33,9 @@ public class AccountService {
         if (userId != null && !userId.equals(existing.getUserId())) {
             throw new IllegalArgumentException("Account not found");
         }
+        if (existing.isDeleted()) {
+            throw new IllegalStateException("Cannot update a deleted account");
+        }
         existing.setName(account.getName());
         existing.setBalance(account.getBalance() != null ? account.getBalance() : existing.getBalance());
         if (account.getIconName() != null) existing.setIconName(account.getIconName());
@@ -42,7 +44,9 @@ public class AccountService {
     }
 
     /**
-     * Xóa ví/tài khoản. Chỉ cho phép khi không còn giao dịch nào tham chiếu tới ví này.
+     * Xóa ví/tài khoản (Soft delete).
+     * Chuyển trạng thái isDeleted = true và cho số dư về 0.
+     * Giao dịch vẫn có thể tham chiếu tới ví này trong lịch sử.
      */
     @Transactional
     public void deleteById(Long id, Long userId) {
@@ -51,12 +55,11 @@ public class AccountService {
         if (userId != null && !userId.equals(account.getUserId())) {
             throw new IllegalArgumentException("Account not found");
         }
-        long count = entryRepository.countByAccountId(id);
-        if (count > 0) {
-            throw new IllegalStateException(
-                    "Không thể xóa ví đang có " + count + " giao dịch. Hãy xóa hoặc chuyển giao dịch sang ví khác trước.");
-        }
-        accountRepository.delete(account);
+        
+        // Thực hiện soft delete: đánh dấu đã xóa và reset số dư
+        account.setDeleted(true);
+        account.setBalance(java.math.BigDecimal.ZERO);
+        accountRepository.save(account);
     }
 
     @Transactional

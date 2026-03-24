@@ -15,12 +15,12 @@ public class AiAssistantRequest {
 
     private Long accountId;
 
-    /** Language code from client (e.g., "vi", "en"). */
+    /** Mã ngôn ngữ từ client (VD: "vi", "en"). */
     private String language;
 
-    /** User ID from X-User-Id header (for scoping entries/accounts). */
+    /** ID người dùng từ header X-User-Id (để giới hạn phạm vi giao dịch/tài khoản). */
     private Long userId;
 
-    /** Base64 encoded image for OCR/Visual analysis. */
+    /** Ảnh được mã hóa Base64 cho phân tích OCR/Hình ảnh. */
     private String base64Image;
 }

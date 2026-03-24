@@ -20,10 +20,10 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Spending analytics engine.
- * Provides: totals, daily averages, top categories, percentage breakdowns,
- * spending trends, budget tracking, overspending alerts, monthly summaries,
- * financial health, weekly patterns, and smart suggestions.
+ * Công cụ phân tích chi tiêu.
+ * Cung cấp: tổng số, trung bình hàng ngày, các danh mục hàng đầu, phân bổ phần trăm,
+ * xu hướng chi tiêu, theo dõi ngân sách, cảnh báo chi tiêu quá mức, tóm tắt hàng tháng,
+ * sức khỏe tài chính, quy luật hàng tuần, và các gợi ý thông minh.
  */
 @Service
 public class SpendingAnalyticsService {
@@ -44,7 +44,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TOTAL SPENDING (userId-scoped)
+    // TỔNG CHI TIÊU (phạm vi userId)
     // ═════════════════════════════════════════════════════════
 
     public BigDecimal getTotalSpending(LocalDate startDate, LocalDate endDate, String typeFilter) {
@@ -60,7 +60,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DAILY AVERAGE
+    // TRUNG BÌNH HÀNG NGÀY
     // ═════════════════════════════════════════════════════════
 
     public DailyAverageResult getDailyAverage(LocalDate startDate, LocalDate endDate, String typeFilter) {
@@ -71,7 +71,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TOP CATEGORIES
+    // DANH MỤC HÀNG ĐẦU
     // ═════════════════════════════════════════════════════════
 
     public List<CategoryTotal> getTopCategories(LocalDate startDate, LocalDate endDate,
@@ -94,7 +94,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // PERCENTAGE BREAKDOWN
+    // PHÂN BỔ PHẦN TRĂM
     // ═════════════════════════════════════════════════════════
 
     public PercentageBreakdownResult getSpendingByCategory(LocalDate startDate, LocalDate endDate,
@@ -130,7 +130,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // SPENDING TREND (period-over-period)
+    // XU HƯỚNG CHI TIÊU (so sánh giữa các kỳ)
     // ═════════════════════════════════════════════════════════
 
     public TrendResult getSpendingTrend(LocalDate currentStart, LocalDate currentEnd,
@@ -166,7 +166,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // RECENT TRANSACTIONS LIST
+    // DANH SÁCH GIAO DỊCH GẦN ĐÂY
     // ═════════════════════════════════════════════════════════
 
     public List<FinancialEntry> getRecentTransactions(LocalDate startDate, LocalDate endDate,
@@ -176,11 +176,11 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // BUDGET TRACKING
+    // THEO DÕI NGÂN SÁCH
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Get budget status for a specific category or all budgets.
+     * Lấy trạng thái ngân sách cho một danh mục cụ thể hoặc tất cả ngân sách.
      */
     public BudgetStatusResult getBudgetStatus(Long userId, Long categoryId,
                                                LocalDate start, LocalDate end) {
@@ -192,7 +192,7 @@ public class SpendingAnalyticsService {
         Budget budget = budgetOpt.get();
         String categoryName = categoryService.getIdToNameMap().getOrDefault(categoryId, "Khác");
 
-        // Determine category type to branch logic
+        // Xác định loại danh mục để phân nhánh logic
         EntryType categoryType = categoryRepository.findById(categoryId)
                 .map(Category::getType)
                 .orElse(EntryType.EXPENSE);
@@ -201,7 +201,7 @@ public class SpendingAnalyticsService {
                 .findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end);
 
         if (categoryType == EntryType.INCOME) {
-            // INCOME TARGET: calculate earned vs target
+            // MỤC TIÊU THU NHẬP: tính toán số tiền đã thu so với mục tiêu
             BigDecimal earned = entries.stream()
                     .filter(e -> e.getType() == EntryType.INCOME && Objects.equals(e.getCategoryId(), categoryId))
                     .map(FinancialEntry::getAmount)
@@ -216,7 +216,7 @@ public class SpendingAnalyticsService {
             return new BudgetStatusResult(categoryName, budget.getAmount(), earned,
                     percentUsed, achieved, overAmount, "INCOME_TARGET");
         } else {
-            // EXPENSE BUDGET: calculate spent vs limit (existing logic)
+            // NGÂN SÁCH CHI TIÊU: tính toán số tiền đã chi so với hạn mức (logic hiện tại)
             BigDecimal categorySpent = entries.stream()
                     .filter(e -> e.getType() == EntryType.EXPENSE && Objects.equals(e.getCategoryId(), categoryId))
                     .map(FinancialEntry::getAmount)
@@ -234,7 +234,7 @@ public class SpendingAnalyticsService {
     }
 
     /**
-     * Get all active budget statuses for a user.
+     * Lấy tất cả các trạng thái ngân sách đang hoạt động của người dùng.
      */
     public List<BudgetStatusResult> getAllBudgetStatuses(Long userId, LocalDate date) {
         List<Budget> budgets = budgetRepository
@@ -251,11 +251,11 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // OVERSPENDING ALERTS
+    // CẢNH BÁO CHI TIÊU QUÁ MỨC
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Detect categories with unusual spending vs historical average.
+     * Phát hiện các danh mục có chi tiêu bất thường so với mức trung bình lịch sử.
      */
     public List<OverspendingAlert> getOverspendingAlerts(Long userId, LocalDate currentStart, LocalDate currentEnd) {
         long days = ChronoUnit.DAYS.between(currentStart, currentEnd) + 1;
@@ -283,7 +283,7 @@ public class SpendingAnalyticsService {
                 BigDecimal diff = entry.getValue().subtract(prevAmount);
                 BigDecimal pctChange = diff.multiply(new BigDecimal("100"))
                         .divide(prevAmount, 1, RoundingMode.HALF_UP);
-                if (pctChange.compareTo(new BigDecimal("30")) > 0) { // >30% increase
+                if (pctChange.compareTo(new BigDecimal("30")) > 0) { // tăng >30%
                     alerts.add(new OverspendingAlert(
                             idToName.getOrDefault(entry.getKey(), "Khác"),
                             entry.getValue(), prevAmount, pctChange));
@@ -295,7 +295,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // MONTHLY SUMMARY
+    // TÓM TẮT HÀNG THÁNG
     // ═════════════════════════════════════════════════════════
 
     public MonthlySummaryResult getMonthlySummary(Long userId, int month, int year) {
@@ -308,7 +308,7 @@ public class SpendingAnalyticsService {
         BigDecimal totalIncome = getTotalSpendingForUser(userId, start, end, EntryType.INCOME);
         BigDecimal prevExpense = getTotalSpendingForUser(userId, prevStart, prevEnd, EntryType.EXPENSE);
 
-        // Category breakdown
+        // Phân bổ theo danh mục
         List<FinancialEntry> entries = userId != null
                 ? entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
                 : entryRepository.findByTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(start, end);
@@ -330,7 +330,7 @@ public class SpendingAnalyticsService {
                     .collect(Collectors.toList());
         }
 
-        // Trend vs previous month
+        // Xu hướng so với tháng trước
         BigDecimal trendPct = BigDecimal.ZERO;
         String trendDir = "STABLE";
         if (prevExpense.compareTo(BigDecimal.ZERO) > 0) {
@@ -345,7 +345,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // FINANCIAL HEALTH
+    // SỨC KHỎE TÀI CHÍNH
     // ═════════════════════════════════════════════════════════
 
     public FinancialHealthResult getFinancialHealth(Long userId, int month, int year) {
@@ -369,7 +369,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // WEEKLY PATTERNS
+    // QUY LUẬT HÀNG TUẦN
     // ═════════════════════════════════════════════════════════
 
     public WeeklyPatternResult getWeeklyPatterns(Long userId, LocalDate start, LocalDate end) {
@@ -415,7 +415,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // SMART SUGGESTIONS
+    // GỢI Ý THÔNG MINH
     // ═════════════════════════════════════════════════════════
 
     public List<SmartSuggestionResult> getSmartSuggestions(Long userId) {
@@ -453,7 +453,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // PRIVATE HELPERS
+    // PHƯƠNG THỨC HỖ TRỢ RIÊNG
     // ═════════════════════════════════════════════════════════
 
     private List<FinancialEntry> getFilteredEntries(LocalDate start, LocalDate end, String typeFilter) {
@@ -467,7 +467,7 @@ public class SpendingAnalyticsService {
                         .filter(e -> e.getType() == finalType)
                         .collect(Collectors.toList());
             } catch (IllegalArgumentException ignored) {
-                // Invalid type, return unfiltered
+                // Loại không hợp lệ, trả về kết quả không lọc
             }
         }
         return entries;
@@ -482,7 +482,7 @@ public class SpendingAnalyticsService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // RESULT DTOs
+    // DTO KẾT QUẢ
     // ═════════════════════════════════════════════════════════
 
     @Getter
@@ -523,7 +523,7 @@ public class SpendingAnalyticsService {
         private final BigDecimal previousTotal;
         private final LocalDate previousStart;
         private final LocalDate previousEnd;
-        private final String trend; // UP, DOWN, STABLE, NEW
+        private final String trend; // TĂNG, GIẢM, ỔN ĐỊNH, MỚI
         private final BigDecimal percentChange;
     }
 
@@ -536,7 +536,7 @@ public class SpendingAnalyticsService {
         private final BigDecimal percentUsed;
         private final boolean overBudget;
         private final BigDecimal overAmount;
-        /** "EXPENSE_BUDGET" or "INCOME_TARGET" */
+        /** "EXPENSE_BUDGET" hoặc "INCOME_TARGET" */
         private final String planType;
     }
 
@@ -555,7 +555,7 @@ public class SpendingAnalyticsService {
         private final BigDecimal totalExpense;
         private final BigDecimal totalIncome;
         private final List<CategoryPercentage> categoryBreakdowns;
-        private final String trendDirection; // UP, DOWN, STABLE
+        private final String trendDirection; // TĂNG, GIẢM, ỔN ĐỊNH
         private final BigDecimal trendPercent;
     }
 

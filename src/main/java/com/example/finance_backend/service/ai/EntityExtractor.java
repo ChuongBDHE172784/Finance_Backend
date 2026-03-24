@@ -9,8 +9,8 @@ import java.time.LocalDate;
 import java.util.*;
 
 /**
- * Extracts transaction entities (amount, category, note, date, type)
- * from preprocessed text using rule-based keyword matching.
+ * Trích xuất các thực thể giao dịch (số tiền, danh mục, ghi chú, ngày, loại)
+ * từ văn bản đã qua tiền xử lý bằng cách sử dụng khớp từ khóa dựa trên quy tắc.
  */
 @Component
 public class EntityExtractor {
@@ -22,12 +22,12 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TRANSACTION SLOT EXTRACTION
+    // TRÍCH XUẤT CÁC Ô GIAO DỊCH
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Extracts transaction slots from a parsed message.
-     * Handles multi-transaction messages (e.g., "phở 45k, cà phê 30k").
+     * Trích xuất các ô (slots) giao dịch từ một tin nhắn đã được phân tích.
+     * Xử lý các tin nhắn có nhiều giao dịch (ví dụ: "phở 45k, cà phê 30k").
      */
     public List<TransactionSlot> extractTransactionSlots(ParsedMessage parsed) {
         List<String> subMessages = parsed.getSubMessages();
@@ -58,18 +58,18 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // CATEGORY INFERENCE
+    // SUY LUẬN DANH MỤC
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Infers category from keywords in the normalized text.
-     * Returns the Vietnamese category name or null if uncertain.
+     * Suy luận danh mục từ các từ khóa trong văn bản đã được chuẩn hóa.
+     * Trả về tên danh mục tiếng Việt hoặc null nếu không chắc chắn.
      */
     public String inferCategory(String normalizedText) {
         if (normalizedText == null) return null;
         for (var entry : CATEGORY_KEYWORDS.entrySet()) {
             String kw = entry.getKey();
-            // Use word boundary to avoid false positives like "tháng" matching "an"
+            // Sử dụng ranh giới từ để tránh các kết quả khớp sai như "tháng" khớp với "an"
             if (normalizedText.matches(".*\\b" + java.util.regex.Pattern.quote(kw) + "\\b.*")) {
                 return entry.getValue();
             }
@@ -78,11 +78,11 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TRANSACTION TYPE DETECTION
+    // PHÁT HIỆN LOẠI GIAO DỊCH
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Detects whether the transaction is EXPENSE or INCOME.
+     * Phát hiện xem giao dịch là CHI TIÊU hay THU NHẬP.
      */
     public String inferTransactionType(String normalizedText) {
         if (normalizedText == null) return "EXPENSE";
@@ -91,11 +91,11 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // QUERY PARAMETER DETECTION
+    // PHÁT HIỆN CÁC THAM SỐ TRUY VẤN
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Detects the query metric from text.
+     * Phát hiện chỉ số truy vấn từ văn bản.
      */
     public String detectMetric(String normalizedText) {
         if (normalizedText == null) return "TOTAL";
@@ -125,7 +125,7 @@ public class EntityExtractor {
     }
 
     /**
-     * Detects the query type filter (EXPENSE/INCOME/ALL).
+     * Phát hiện bộ lọc loại truy vấn (CHI TIÊU/THU NHẬP/TẤT CẢ).
      */
     public String detectQueryType(String normalizedText) {
         if (normalizedText == null) return "EXPENSE";
@@ -137,49 +137,49 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // CATEGORY NORMALIZATION
+    // CHUẨN HÓA DANH MỤC
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Normalizes English/Vietnamese category names to the canonical Vietnamese names
-     * used in the database.
+     * Chuẩn hóa tên danh mục tiếng Anh/tiếng Việt sang tên tiếng Việt chuẩn
+     * được sử dụng trong cơ sở dữ liệu.
      */
     public String normalizeCategoryName(String name) {
         if (name == null) return null;
         String trimmed = name.trim();
         String normalized = textPreprocessor.normalizeVietnamese(trimmed);
 
-        // Income aliases
+        // Các bí danh cho Thu nhập
         if (Set.of("nap vi", "nap tien", "top up", "topup", "deposit", "income",
                 "salary", "wage", "bonus", "refund", "cashback", "transfer in").contains(normalized)) {
             return "Nạp tiền";
         }
-        // Food aliases
+        // Các bí danh cho Ăn uống
         if (Set.of("food", "meal", "lunch", "dinner", "breakfast", "restaurant",
                 "coffee", "tea", "drink", "milk tea", "snack").contains(normalized)) {
             return "Ăn uống";
         }
         if ("parking".equals(normalized)) return "Gửi xe";
-        // Transport aliases
+        // Các bí danh cho Xăng xe
         if (Set.of("gas", "gasoline", "petrol", "fuel", "transport", "transportation",
                 "taxi", "uber", "grab").contains(normalized)) {
             return "Xăng xe";
         }
-        // Shopping aliases
+        // Các bí danh cho Mua sắm
         if (Set.of("shopping", "groceries", "supermarket", "mall", "clothes",
                 "purchase", "buy").contains(normalized)) {
             return "Mua sắm";
         }
-        // Entertainment aliases
+        // Các bí danh cho Giải trí
         if (Set.of("entertainment", "movie", "cinema", "netflix", "game",
                 "gift", "present", "birthday").contains(normalized)) {
             return "Giải trí";
         }
-        // Health aliases
+        // Các bí danh cho Y tế
         if (Set.of("health", "medical", "hospital", "medicine", "pharmacy").contains(normalized)) {
             return "Y tế";
         }
-        // Education aliases
+        // Các bí danh cho Giáo dục
         if (Set.of("education", "school", "tuition", "book", "course", "study").contains(normalized)) {
             return "Giáo dục";
         }
@@ -189,7 +189,7 @@ public class EntityExtractor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // KEYWORD MAPS
+    // CÁC BẢN ĐỒ TỪ KHÓA
     // ═════════════════════════════════════════════════════════
 
     private static final List<String> INCOME_KEYWORDS = List.of(
@@ -199,11 +199,11 @@ public class EntityExtractor {
             "income", "salary", "wage", "bonus", "receive", "received",
             "deposit", "top up", "topup", "transfer in", "cashback");
 
-    /** Category keyword map: normalized keyword → Vietnamese category name */
+    /** Bản đồ từ khóa danh mục: từ khóa đã chuẩn hóa → tên danh mục tiếng Việt */
     private static final LinkedHashMap<String, String> CATEGORY_KEYWORDS = new LinkedHashMap<>();
 
     static {
-        // Food & Drink
+        // Ăn uống
         CATEGORY_KEYWORDS.put("ca phe", "Ăn uống");
         CATEGORY_KEYWORDS.put("cafe", "Ăn uống");
         CATEGORY_KEYWORDS.put("coffee", "Ăn uống");
@@ -224,7 +224,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("nhau", "Ăn uống");
         CATEGORY_KEYWORDS.put("an ", "Ăn uống");
 
-        // Transport
+        // Di chuyển/Xăng xe
         CATEGORY_KEYWORDS.put("do xang", "Xăng xe");
         CATEGORY_KEYWORDS.put("xe may", "Xăng xe");
         CATEGORY_KEYWORDS.put("o to", "Xăng xe");
@@ -242,12 +242,12 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("gas", "Xăng xe");
         CATEGORY_KEYWORDS.put("xe", "Xăng xe");
 
-        // Parking
+        // Gửi xe
         CATEGORY_KEYWORDS.put("gui xe", "Gửi xe");
         CATEGORY_KEYWORDS.put("ve xe", "Gửi xe");
         CATEGORY_KEYWORDS.put("parking", "Gửi xe");
 
-        // Shopping
+        // Mua sắm
         CATEGORY_KEYWORDS.put("sieu thi", "Mua sắm");
         CATEGORY_KEYWORDS.put("quan ao", "Mua sắm");
         CATEGORY_KEYWORDS.put("my pham", "Mua sắm");
@@ -266,7 +266,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("sam", "Mua sắm");
         CATEGORY_KEYWORDS.put("mua", "Mua sắm");
 
-        // Entertainment
+        // Giải trí
         CATEGORY_KEYWORDS.put("du lich", "Giải trí");
         CATEGORY_KEYWORDS.put("sinh nhat", "Giải trí");
         CATEGORY_KEYWORDS.put("qua tang", "Giải trí");
@@ -282,7 +282,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("rap", "Giải trí");
         CATEGORY_KEYWORDS.put("choi", "Giải trí");
 
-        // Health
+        // Y tế
         CATEGORY_KEYWORDS.put("benh vien", "Y tế");
         CATEGORY_KEYWORDS.put("bac si", "Y tế");
         CATEGORY_KEYWORDS.put("y te", "Y tế");
@@ -295,7 +295,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("medicine", "Y tế");
         CATEGORY_KEYWORDS.put("pharmacy", "Y tế");
 
-        // Education
+        // Giáo dục
         CATEGORY_KEYWORDS.put("hoc phi", "Giáo dục");
         CATEGORY_KEYWORDS.put("khoa hoc", "Giáo dục");
         CATEGORY_KEYWORDS.put("education", "Giáo dục");
@@ -307,7 +307,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("hoc", "Giáo dục");
         CATEGORY_KEYWORDS.put("sach", "Giáo dục");
 
-        // Housing
+        // Nhà cửa
         CATEGORY_KEYWORDS.put("thue nha", "Nhà cửa");
         CATEGORY_KEYWORDS.put("thue", "Nhà cửa");
         CATEGORY_KEYWORDS.put("dien", "Nhà cửa");
@@ -316,7 +316,7 @@ public class EntityExtractor {
         CATEGORY_KEYWORDS.put("giat", "Nhà cửa");
         CATEGORY_KEYWORDS.put("rent", "Nhà cửa");
 
-        // Income
+        // Thu nhập
         CATEGORY_KEYWORDS.put("nap vao", "Nạp tiền");
         CATEGORY_KEYWORDS.put("vao vi", "Nạp tiền");
         CATEGORY_KEYWORDS.put("chuyen vao", "Nạp tiền");

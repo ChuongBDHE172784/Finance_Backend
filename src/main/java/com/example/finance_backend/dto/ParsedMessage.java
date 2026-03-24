@@ -7,8 +7,8 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Result of text pre-processing. Contains normalized text, extracted monetary values,
- * detected dates, and sub-messages for multi-transaction input.
+ * Kết quả của quá trình tiền xử lý văn bản. Chứa văn bản đã chuẩn hóa, các giá trị tiền tệ được trích xuất,
+ * các ngày được phát hiện, và các tin nhắn con cho đầu vào chứa nhiều giao dịch.
  */
 @Getter
 @Setter
@@ -16,18 +16,18 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class ParsedMessage {
-    /** Original user message */
+    /** Tin nhắn gốc của người dùng */
     private String originalText;
-    /** Normalized text (Vietnamese diacritics removed, lowercased) */
+    /** Văn bản đã chuẩn hóa (đã loại bỏ dấu tiếng Việt, chuyển thành chữ thường) */
     private String normalizedText;
-    /** Detected language: "vi" or "en" */
+    /** Ngôn ngữ được phát hiện: "vi" hoặc "en" */
     private String language;
-    /** All monetary amounts extracted from the message */
+    /** Tất cả các số tiền được trích xuất từ tin nhắn */
     private List<BigDecimal> extractedAmounts;
-    /** Date range detected in the message */
+    /** Khoảng ngày được phát hiện trong tin nhắn */
     private LocalDate startDate;
     private LocalDate endDate;
-    /** Sub-messages for multi-transaction input (e.g., "phở 45k, cà phê 30k" → 2 items) */
+    /** Các tin nhắn con cho đầu vào đa giao dịch (VD: "phở 45k, cà phê 30k" → 2 mục) */
     private List<String> subMessages;
 
     public boolean hasAmounts() {

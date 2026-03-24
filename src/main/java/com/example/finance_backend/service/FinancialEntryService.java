@@ -28,28 +28,40 @@ public class FinancialEntryService {
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findAll(Long userId) {
         if (userId == null) return List.of();
-        var idToName = categoryService.getIdToNameMap();
+        var idToCatName = categoryService.getIdToNameMap();
+        var idToAccName = getAccountIdToNameMap(userId);
         return entryRepository.findByUserIdOrderByTransactionDateDescCreatedAtDesc(userId).stream()
-                .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
+                .map(e -> FinancialEntryDto.fromEntity(e, 
+                        idToCatName.getOrDefault(e.getCategoryId(), ""),
+                        idToAccName.getOrDefault(e.getAccountId(), ""),
+                        idToAccName.getOrDefault(e.getToAccountId(), "")))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findByDateRange(Long userId, LocalDate start, LocalDate end) {
         if (userId == null) return List.of();
-        var idToName = categoryService.getIdToNameMap();
+        var idToCatName = categoryService.getIdToNameMap();
+        var idToAccName = getAccountIdToNameMap(userId);
         return entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
                 .stream()
-                .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
+                .map(e -> FinancialEntryDto.fromEntity(e, 
+                        idToCatName.getOrDefault(e.getCategoryId(), ""),
+                        idToAccName.getOrDefault(e.getAccountId(), ""),
+                        idToAccName.getOrDefault(e.getToAccountId(), "")))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findByTag(Long userId, String tag) {
         if (userId == null) return List.of();
-        var idToName = categoryService.getIdToNameMap();
+        var idToCatName = categoryService.getIdToNameMap();
+        var idToAccName = getAccountIdToNameMap(userId);
         return entryRepository.findByUserIdAndTagContaining(userId, tag).stream()
-                .map(e -> FinancialEntryDto.fromEntity(e, idToName.getOrDefault(e.getCategoryId(), "")))
+                .map(e -> FinancialEntryDto.fromEntity(e, 
+                        idToCatName.getOrDefault(e.getCategoryId(), ""),
+                        idToAccName.getOrDefault(e.getAccountId(), ""),
+                        idToAccName.getOrDefault(e.getToAccountId(), "")))
                 .collect(Collectors.toList());
     }
 
@@ -57,7 +69,12 @@ public class FinancialEntryService {
     public Optional<FinancialEntryDto> findById(Long id, Long userId) {
         return entryRepository.findById(id)
                 .filter(e -> userId == null || userId.equals(e.getUserId()))
-                .map(e -> FinancialEntryDto.fromEntity(e, categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "")));
+                .map(e -> {
+                    String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
+                    String accName = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).map(Account::getName).orElse("") : "";
+                    String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
+                    return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
+                });
     }
 
     @Transactional
@@ -109,7 +126,9 @@ public class FinancialEntryService {
 
         e = entryRepository.save(e);
         String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-        return FinancialEntryDto.fromEntity(e, catName);
+        String accName = account.getName();
+        String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
+        return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
     }
 
     @Transactional
@@ -173,7 +192,9 @@ public class FinancialEntryService {
 
         e = entryRepository.save(e);
         String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-        return FinancialEntryDto.fromEntity(e, catName);
+        String accName = newAccount.getName();
+        String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
+        return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
     }
 
     @Transactional
@@ -198,7 +219,9 @@ public class FinancialEntryService {
             e.setImageUrl("/" + dir + filename);
             e = entryRepository.save(e);
             String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-            return FinancialEntryDto.fromEntity(e, catName);
+            String accName = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).map(Account::getName).orElse("") : "";
+            String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
+            return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
         } catch (java.io.IOException ex) {
             throw new RuntimeException("Upload failed", ex);
         }
@@ -237,5 +260,12 @@ public class FinancialEntryService {
         } catch (IllegalArgumentException e) {
             return EntrySource.MANUAL;
         }
+    }
+
+    private java.util.Map<Long, String> getAccountIdToNameMap(Long userId) {
+        // Lấy tất cả ví của user bao gồm cả ví đã xóa (soft delete) để hiển thị lịch sử
+        return accountRepository.findAll().stream()
+                .filter(a -> userId == null || userId.equals(a.getUserId()))
+                .collect(Collectors.toMap(Account::getId, Account::getName, (v1, v2) -> v1));
     }
 }

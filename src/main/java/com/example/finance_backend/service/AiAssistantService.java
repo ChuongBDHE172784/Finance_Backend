@@ -35,12 +35,12 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * AI Assistant orchestrator — delegates to pipeline components:
+ * Bộ điều phối AI Assistant — ủy thác cho các thành phần pipeline:
  * TextPreprocessor → IntentDetector → EntityExtractor →
  * ConversationContextManager
  * → SpendingAnalyticsService → ResponseGenerator
  *
- * Also uses GeminiClientWrapper for complex NLU when rules fail.
+ * Cũng sử dụng GeminiClientWrapper cho các hiểu biết ngôn ngữ tự nhiên (NLU) phức tạp khi các quy tắc thất bại.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,7 +49,7 @@ public class AiAssistantService {
     private static final Logger log = LoggerFactory.getLogger(AiAssistantService.class);
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ISO_LOCAL_DATE;
 
-    // ── Pipeline components ──
+    // ── Các thành phần Pipeline ──
     private final TextPreprocessor textPreprocessor;
     private final IntentDetector intentDetector;
     private final EntityExtractor entityExtractor;
@@ -59,7 +59,7 @@ public class AiAssistantService {
     private final SpendingAnalyticsService analyticsService;
     private final FinancialScoreEngine financialScoreEngine;
 
-    // ── Data services ──
+    // ── Dịch vụ dữ liệu ──
     private final FinancialEntryService entryService;
     private final FinancialEntryRepository entryRepository;
     private final AccountRepository accountRepository;
@@ -69,7 +69,7 @@ public class AiAssistantService {
     private final CategoryRepository categoryRepository;
 
     // ═════════════════════════════════════════════════════════
-    // CONVERSATION STATE
+    // TRẠNG THÁI CUỘC HỘI THOẠI
     // ═════════════════════════════════════════════════════════
     public static class PendingPlanAction {
         public String intent;
@@ -82,7 +82,7 @@ public class AiAssistantService {
     private final Map<String, PendingPlanAction> planningState = new java.util.concurrent.ConcurrentHashMap<>();
 
     // ═════════════════════════════════════════════════════════
-    // MAIN PIPELINE ENTRY POINT
+    // ĐIỂM VÀO CHÍNH CỦA PIPELINE
     // ═════════════════════════════════════════════════════════
 
     public AiAssistantResponse handle(AiAssistantRequest request) {
@@ -92,11 +92,11 @@ public class AiAssistantService {
             conversationId = UUID.randomUUID().toString();
         }
 
-        // Step 1: Pre-process text
+        // Bước 1: Tiền xử lý văn bản
         ParsedMessage parsed = textPreprocessor.preprocess(message, request.getLanguage());
         String language = parsed.getLanguage();
 
-        // Empty input check
+        // Kiểm tra đầu vào trống
         if (message.isEmpty() && (request.getBase64Image() == null || request.getBase64Image().isBlank())) {
             AiAssistantResponse resp = AiAssistantResponse.builder()
                     .intent("UNKNOWN")
@@ -106,40 +106,40 @@ public class AiAssistantService {
             return resp;
         }
 
-        // Step 2: Load conversation history
+        // Bước 2: Tải lịch sử cuộc hội thoại
         List<AiMessage> history = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
 
-        // Step 3: Try Gemini for complex understanding
+        // Bước 3: Thử dùng Gemini để hiểu ngữ cảnh phức tạp
         GeminiParseResult geminiResult = null;
         try {
             geminiResult = geminiClient.parse(message, request.getBase64Image(), history, language);
         } catch (Exception e) {
-            log.warn("Gemini parse failed, falling back to rules: {}", e.getMessage());
+            log.warn("Gemini parse thất bại, chuyển sang sử dụng quy tắc (rules): {}", e.getMessage());
         }
 
-        // Step 4: Determine intent (hybrid: Gemini + rule-based)
+        // Bước 4: Xác định ý định (kết hợp: Gemini + dựa trên quy tắc)
         IntentResult intentResult;
         if (geminiResult != null && geminiResult.intent != null
                 && !geminiResult.intent.isBlank()
                 && !"UNKNOWN".equalsIgnoreCase(geminiResult.intent)) {
-            // Gemini succeeded — use its intent
+            // Gemini thành công — sử dụng ý định từ Gemini
             intentResult = mapGeminiIntent(geminiResult.intent);
         } else if (geminiResult != null && geminiResult.entries != null && !geminiResult.entries.isEmpty()) {
-            // Gemini found entries (likely from image) but didn't label intent clearly
+            // Gemini tìm thấy các giao dịch (thường từ hình ảnh) nhưng không gán nhãn ý định rõ ràng
             intentResult = IntentResult.builder()
                     .intent(Intent.INSERT_TRANSACTION)
                     .confidence(0.8)
                     .source(IntentResult.Source.GEMINI)
                     .build();
         } else {
-            // Rule-based fallback
+            // Dự phòng dựa trên quy tắc (rules)
             intentResult = intentDetector.detect(parsed);
         }
 
-        // ── CATEGORY TYPE FALLBACK (If intent is ambiguous or unknown) ──
+        // ── DỰ PHÒNG LOẠI DANH MỤC (Nếu ý định mơ hồ hoặc không xác định) ──
         if (intentResult.getIntent() == Intent.UNKNOWN || intentResult.getIntent() == Intent.INSERT_TRANSACTION) {
              String norm = parsed.getNormalizedText();
-             // Look for evidence that this is a plan (month, "for", "set", "create")
+             // Tìm bằng chứng cho thấy đây là một kế hoạch (tháng, "cho", "đặt", "tạo")
              boolean isPlanContext = norm.contains("thang") || norm.contains("month") 
                                   || norm.contains("cho ") || norm.contains("vao ")
                                   || norm.contains("dat ") || norm.contains("tao ") || norm.contains("han muc");
@@ -161,7 +161,7 @@ public class AiAssistantService {
              }
         }
 
-        // ── Support Continuation Messages ──
+        // ── Hỗ trợ các tin nhắn tiếp tục ──
         PendingPlanAction pending = planningState.get(conversationId);
         if (pending != null) {
             String norm = parsed.getNormalizedText();
@@ -173,11 +173,11 @@ public class AiAssistantService {
                         conversationId, message, request.getBase64Image(), request.getUserId());
             }
 
-            // Treat everything else as continuation of the pending intent
+            // Xử lý mọi thứ khác dưới dạng tiếp tục của ý định đang chờ xử lý
             Intent forcedIntent = "CREATE_BUDGET".equals(pending.intent) ? Intent.CREATE_BUDGET : Intent.CREATE_INCOME_GOAL;
             intentResult = IntentResult.builder().intent(forcedIntent).confidence(1.0).source(IntentResult.Source.RULE).build();
 
-            // Detect correction keywords (change, wrong, other, etc.)
+            // Phát hiện các từ khóa sửa đổi (đổi, sai, khác, v.v.)
             boolean isCorrection = norm.contains("doi ") || norm.contains("sai ") 
                                 || norm.contains("nham") || norm.contains("khac") 
                                 || norm.contains("thay ") || norm.contains("sua ");
@@ -187,26 +187,26 @@ public class AiAssistantService {
                 if (norm.contains("hang muc") || norm.contains("danh muc") || norm.contains("loai") || norm.contains("khac") || norm.contains("category")) pending.category = null;
             }
             
-            // Try to extract any new info (month, amount, category)
+            // Cố gắng trích xuất bất kỳ thông tin mới nào (tháng, số tiền, danh mục)
             if (geminiResult != null && geminiResult.entries != null && !geminiResult.entries.isEmpty()) {
                 GeminiParsedEntry e = geminiResult.entries.get(0);
                 if (e.amount != null) pending.amount = e.amount;
                 if (e.categoryName != null) pending.category = e.categoryName;
                 if (e.date != null) pending.month = e.date;
             }
-            // Manually extract month if possible
+            // Trích xuất tháng thủ công nếu có thể
             if (pending.month == null && (message.toLowerCase().contains("tháng") || message.toLowerCase().contains("month") || message.matches(".*\\b(t1|t2|t3|t4|t5|t6|t7|t8|t9|t10|t11|t12)\\b.*"))) {
-                pending.month = message; // Just store the raw string for parseDate logic
+                pending.month = message; // Chỉ lưu chuỗi thô cho logic parseDate
             }
             if (pending.category == null && parsed.getNormalizedText().length() > 0 && !parsed.hasAmounts() && !isRuleBasedConfirmation(parsed.getNormalizedText())) {
-                 // Assume the text might be a category if it's not a confirmation and no amount
+                 // Giả định văn bản có thể là một danh mục nếu nó không phải là xác nhận và không có số tiền
                  if (!message.toLowerCase().contains("tháng") && !message.toLowerCase().contains("month")) {
                      pending.category = message;
                  }
             }
         }
 
-        // Step 5: Dispatch by intent
+        // Bước 5: Điều phối theo ý định
         AiAssistantResponse response;
         switch (intentResult.getIntent()) {
             case INSERT_TRANSACTION:
@@ -243,7 +243,7 @@ public class AiAssistantService {
                 response = handleAdvice(geminiResult, request.getUserId(), language);
                 break;
             default:
-                // Context-aware: check if this is a follow-up to a clarification
+                // Nhận biết ngữ cảnh: kiểm tra xem đây có phải là phản hồi cho một yêu cầu làm rõ không
                 response = handleContextualFallback(parsed, geminiResult, history, request, language);
                 break;
         }
@@ -252,13 +252,13 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // INSERT HANDLER
+    // XỬ LÝ THÊM GIAO DỊCH
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleInsert(String originalMessage, ParsedMessage parsed,
             GeminiParseResult gemini,
             Long forcedAccountId, Long userId, String language, List<AiMessage> history) {
-        // Extract transaction slots from Gemini or rules
+        // Trích xuất các ô (slots) giao dịch từ Gemini hoặc quy tắc quy định
         List<TransactionSlot> slots;
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
             slots = gemini.entries.stream().map(e -> TransactionSlot.builder()
@@ -272,7 +272,7 @@ public class AiAssistantService {
             slots = entityExtractor.extractTransactionSlots(parsed);
         }
 
-        // ── DRAFT EXTRACTION & MERGING ──
+        // ── TRÍCH XUẤT VÀ HỢP NHẤT BẢN NHÁP ──
         List<GeminiParsedEntry> draftEntries = gemini != null && gemini.entries != null && !gemini.entries.isEmpty()
                 ? new ArrayList<>(gemini.entries)
                 : (slots.isEmpty() ? new ArrayList<>() : slots.stream().map(s -> {
@@ -285,18 +285,18 @@ public class AiAssistantService {
                     return e;
                 }).collect(Collectors.toList()));
 
-        // Recover previous drafts from history to ensure accumulation across turns
+        // Khôi phục các bản nháp trước đó từ lịch sử để đảm bảo tích lũy qua các lượt hội thoại
         List<GeminiParsedEntry> previousDrafts = extractDraftEntriesFromHistory(history);
         if (!previousDrafts.isEmpty()) {
             for (GeminiParsedEntry prev : previousDrafts) {
                 boolean duplicate = draftEntries.stream().anyMatch(curr -> isSameEntry(curr, prev));
                 if (!duplicate) {
-                    draftEntries.add(0, prev); // Prepend to maintain order
+                    draftEntries.add(0, prev); // Thêm vào đầu để duy trì thứ tự
                 }
             }
         }
 
-        // ── INTENT DECISION ──
+        // ── QUYẾT ĐỊNH Ý ĐỊNH ──
         boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation))
                 || isRuleBasedConfirmation(parsed.getNormalizedText());
 
@@ -307,7 +307,7 @@ public class AiAssistantService {
                     .build();
         }
 
-        // If NOT confirming, show draft
+        // Nếu KHÔNG xác nhận, hiển thị bản nháp
         if (!isConfirmation) {
             return AiAssistantResponse.builder()
                     .intent("INSERT")
@@ -317,10 +317,10 @@ public class AiAssistantService {
                     .build();
         }
 
-        // If CONFIRMING, proceed to save (below)
+        // Nếu XÁC NHẬN, tiến hành lưu (bên dưới)
 
-        // ── SAVE WORKFLOW (ONLY IF CONFIRMING) ──
-        // If it's NOT a confirmation turn, we might STILL need clarification for the NEW slots
+        // ── LUỒNG CÔNG VIỆC LƯU (CHỈ KHI XÁC NHẬN) ──
+        // Nếu KHÔNG phải lượt xác nhận, chúng ta CÓ THỂ vẫn cần làm rõ cho các ô (slots) MỚI
         if (!isConfirmation && !slots.isEmpty()) {
             slots = contextManager.resolveWithContext(slots,
                     IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), parsed, history);
@@ -336,7 +336,7 @@ public class AiAssistantService {
             }
         }
 
-        // Resolve account
+        // Xác định tài khoản/ví
         AccountResolution acctRes = resolveAccount(originalMessage, forcedAccountId, userId, language);
         if (acctRes.errorMessage != null) {
             return AiAssistantResponse.builder().intent("INSERT").reply(acctRes.errorMessage).build();
@@ -440,7 +440,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // QUERY HANDLER (delegates to SpendingAnalyticsService)
+    // XỬ LÝ TRUY VẤN (ủy thác cho SpendingAnalyticsService)
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleQuery(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
@@ -474,7 +474,7 @@ public class AiAssistantService {
         if (!List.of("EXPENSE", "INCOME", "TRANSFER", "ALL").contains(typeFilter))
             typeFilter = "EXPENSE";
 
-        // Use SpendingAnalyticsService for analytics
+        // Sử dụng SpendingAnalyticsService để phân tích dữ liệu
         switch (metric) {
             case "TOP_CATEGORY":
                 return buildTopCategoryReply(start, end, typeFilter, language);
@@ -633,7 +633,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // UPDATE HANDLER
+    // XỬ LÝ CẬP NHẬT
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleUpdate(String originalMessage, ParsedMessage parsed,
@@ -644,7 +644,7 @@ public class AiAssistantService {
         if (target != null) {
             targets = findTargetEntries(target);
         } else {
-            // Rule-based target detection
+            // Phát hiện mục tiêu dựa trên quy tắc (rules)
             targets = findTargetEntriesFromText(parsed);
         }
 
@@ -659,13 +659,13 @@ public class AiAssistantService {
 
         FinancialEntry entry = targets.get(0);
 
-        // Get new data
+        // Lấy dữ liệu mới
         GeminiParsedEntry newData = (gemini != null && gemini.entries != null && !gemini.entries.isEmpty())
                 ? gemini.entries.get(0)
                 : null;
 
         if (newData == null) {
-            // Try salvage from message pattern "thành/to"
+            // Thử cứu vãn từ mẫu tin nhắn "thành/sang/đến"
             newData = salvageUpdateData(originalMessage);
         }
 
@@ -698,7 +698,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DELETE HANDLER
+    // XỬ LÝ XÓA
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleDelete(String originalMessage, ParsedMessage parsed,
@@ -713,7 +713,7 @@ public class AiAssistantService {
             targets = findTargetEntriesFromText(parsed);
         }
 
-        // Safety layer: even if Gemini target exists, check for "delete all" keywords in the message
+        // Lớp bảo vệ an toàn: ngay cả khi mục tiêu từ Gemini tồn tại, hãy kiểm tra các từ khóa "xóa tất cả" trong tin nhắn
         String normalized = parsed.getNormalizedText();
         if (!deleteAll) {
             deleteAll = normalized.contains("tat ca") || normalized.contains("toan bo")
@@ -722,9 +722,9 @@ public class AiAssistantService {
                     || normalized.contains("remove all") || normalized.contains("delete all");
         }
 
-        // Special case: "cancel draft" instead of "delete from DB"
+        // Trường hợp đặc biệt: "hủy bản nháp" thay vì "xóa khỏi DB"
         if (targets.isEmpty() && (normalized.contains("huy") || normalized.contains("lam lai") || normalized.contains("cancel") || normalized.contains("discard"))) {
-            // Check if there was a draft in history
+            // Kiểm tra xem có bản nháp nào trong lịch sử không
             return AiAssistantResponse.builder()
                     .intent("DELETE")
                     .reply(responseGenerator.t(language, "Đã hủy các giao dịch đang chờ.", "Pending transactions discarded."))
@@ -753,7 +753,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // ADVICE HANDLER
+    // XỬ LÝ LỜI KHUYÊN
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleAdvice(GeminiParseResult gemini, Long userId, String language) {
@@ -763,7 +763,7 @@ public class AiAssistantService {
                         "Mình có thể giúp bạn quản lý chi tiêu, ghi nhận thu chi, và phân tích tài chính. Hãy thử hỏi nhé!",
                         "I can help you manage expenses, record transactions, and analyze finances. Just ask!");
 
-        // Enrich with financial context if userId is available
+        // Làm phong phú thêm với ngữ cảnh tài chính nếu có userId
         if (userId != null) {
             try {
                 LocalDate now = LocalDate.now();
@@ -784,7 +784,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // BUDGET QUERY HANDLER
+    // XỬ LÝ TRUY VẤN NGÂN SÁCH
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleBudgetQuery(Long userId, String language) {
@@ -802,13 +802,13 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // MONTHLY SUMMARY HANDLER
+    // XỬ LÝ TỔNG KẾT THÁNG
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleMonthlySummary(Long userId, String language) {
         LocalDate now = LocalDate.now();
         MonthlySummaryResult summary = analyticsService.getMonthlySummary(userId, now.getMonthValue(), now.getYear());
-        // Append overspending alerts
+        // Thêm cảnh báo chi tiêu quá mức
         List<OverspendingAlert> alerts = analyticsService.getOverspendingAlerts(
                 userId, now.withDayOfMonth(1), now);
         String reply = responseGenerator.monthlySummaryReply(summary, now.getMonthValue(), now.getYear(), language);
@@ -819,7 +819,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // FINANCIAL SCORE HANDLER
+    // XỬ LÝ ĐIỂM TÀI CHÍNH
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleFinancialScore(Long userId, String language) {
@@ -837,7 +837,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // ADVANCED QUERY BUILDERS
+    // CÁC BỘ XÂY DỰNG TRUY VẤN NÂNG CAO
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse buildFinancialHealthReply(Long userId, String language) {
@@ -860,32 +860,31 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // CONTEXTUAL FALLBACK (handles follow-up messages)
+    // DỰ PHÒNG THEO NGỮ CẢNH (xử lý các tin nhắn tiếp theo)
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleContextualFallback(ParsedMessage parsed, GeminiParseResult gemini,
             List<AiMessage> history,
             AiAssistantRequest request, String language) {
-        // 1. If Gemini actually found entries even if intent was UNKNOWN, try
-        // handleInsert
+        // 1. Nếu Gemini thực sự tìm thấy các giao dịch ngay cả khi ý định KHÔNG XÁC ĐỊNH, hãy thử xử lý handleInsert
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
             return handleInsert(parsed.getOriginalText(), parsed, gemini,
                     request.getAccountId(), request.getUserId(), language, history);
         }
 
-        // 2. Try to fill slots from conversation context (text-based)
+        // 2. Thử điền các ô (slots) từ ngữ cảnh hội thoại (dựa trên văn bản)
         List<TransactionSlot> slots = entityExtractor.extractTransactionSlots(parsed);
         slots = contextManager.resolveWithContext(slots,
                 IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), parsed, history);
 
-        // If context resolved to a complete transaction, insert it
+        // Nếu ngữ cảnh đã giải quyết thành một giao dịch hoàn chỉnh, hãy thêm nó
         boolean hasComplete = slots.stream().anyMatch(TransactionSlot::isComplete);
         if (hasComplete && parsed.hasAmounts()) {
             return handleInsert(parsed.getOriginalText(), parsed, null,
                     request.getAccountId(), request.getUserId(), language, history);
         }
 
-        // 3. Ask clarification if we have partial info
+        // 3. Yêu cầu làm rõ nếu chúng ta có thông tin một phần
         String clarification = contextManager.detectClarificationNeeded(slots,
                 IntentResult.builder().intent(Intent.INSERT_TRANSACTION).build(), language);
         if (clarification != null && (slots.stream().anyMatch(s -> s.getNote() != null && !s.getNote().isBlank())
@@ -894,7 +893,7 @@ public class AiAssistantService {
                     .intent("INSERT").refreshRequired(false).reply(clarification).build();
         }
 
-        // 4. Ultimate fallback
+        // 4. Dự phòng cuối cùng
         return AiAssistantResponse.builder()
                 .intent("UNKNOWN")
                 .reply(responseGenerator.unknownMessage(language))
@@ -902,7 +901,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TARGET ENTRY SEARCH
+    // TÌM KIẾM GIAO DỊCH MỤC TIÊU
     // ═════════════════════════════════════════════════════════
 
     private List<FinancialEntry> findTargetEntries(GeminiParsedTarget target) {
@@ -959,7 +958,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // HELPER METHODS
+    // CÁC PHƯƠNG THỨC HỖ TRỢ
     // ═════════════════════════════════════════════════════════
 
     private IntentResult mapGeminiIntent(String geminiIntent) {
@@ -1010,7 +1009,7 @@ public class AiAssistantService {
 
     private AccountResolution resolveAccount(String message, Long forcedAccountId, Long userId, String language) {
         List<Account> accounts = (userId != null)
-                ? accountRepository.findByUserIdOrderByNameAsc(userId)
+                ? accountRepository.findByUserIdAndIsDeletedFalseOrderByNameAsc(userId)
                 : accountRepository.findAll();
         if (accounts.isEmpty())
             return AccountResolution.none();
@@ -1023,7 +1022,7 @@ public class AiAssistantService {
         }
         if (accounts.size() == 1)
             return AccountResolution.selected(accounts.get(0).getId());
-        // Try to match account name in message
+        // Thử khớp tên tài khoản trong tin nhắn
         if (message != null && !message.isBlank()) {
             String normMsg = textPreprocessor.normalizeVietnamese(message);
             Long bestId = null;
@@ -1131,7 +1130,7 @@ public class AiAssistantService {
         if (base64Data == null || base64Data.isBlank())
             return null;
         try {
-            // Remove prefix if present (e.g., "data:image/png;base64,")
+            // Xóa tiền tố nếu có (ví dụ: "data:image/png;base64,")
             String base64Part = base64Data;
             String extension = ".png"; // Default
             if (base64Data.contains(",")) {
@@ -1163,7 +1162,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // BUDGET SETTER
+    // THIẾT LẬP NGÂN SÁCH
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleCreateBudget(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
@@ -1179,7 +1178,7 @@ public class AiAssistantService {
                 ? gemini.entries.get(0)
                 : null;
                 
-        // Sync pending state
+        // Đồng bộ trạng thái đang chờ xử lý
         PendingPlanAction pending = planningState.computeIfAbsent(conversationId, k -> {
             PendingPlanAction p = new PendingPlanAction();
             p.intent = "CREATE_BUDGET";
@@ -1190,7 +1189,7 @@ public class AiAssistantService {
         if (data != null && data.categoryName != null) pending.category = data.categoryName;
         if (data != null && data.date != null) pending.month = data.date;
 
-        // 1. Resolve Category
+        // 1. Xác định Danh mục (Category)
         Map<String, Long> nameToId = getNameToIdMap();
         Long catId = null;
         if (pending.category != null) {
@@ -1218,7 +1217,7 @@ public class AiAssistantService {
             return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
         }
 
-        // Store resolved category name
+        // Lưu tên danh mục đã xác định
         final Long finalCatId = catId;
         String resolvedName = nameToId.entrySet().stream()
                 .filter(e -> e.getValue().equals(finalCatId))
@@ -1231,10 +1230,10 @@ public class AiAssistantService {
                 .map(Category::getType)
                 .orElse(null);
         if (catType == EntryType.INCOME) {
-            // Check if the user actually mentioned an income category or if it was just inferred from a keyword in a trigger message
+            // Kiểm tra xem người dùng thực sự đề cập đến một danh mục thu nhập hay nó chỉ được suy luận từ một từ khóa trong tin nhắn kích hoạt
             boolean isExplicit = (parsed.getOriginalText().toLowerCase().contains(resolvedName.toLowerCase()));
             if (!isExplicit) {
-                // False positive inference: Proceed to ask for category selection as if catId was null
+                // Suy luận sai lệch tích cực (False positive): Tiến hành yêu cầu chọn danh mục như thể catId là null
                 catId = null;
                 pending.category = null;
                 pending.awaitingField = "CATEGORY";
@@ -1245,7 +1244,7 @@ public class AiAssistantService {
                 reply += responseGenerator.t(language, "\n\nVí dụ: \"Tạo ngân sách [tên hạng mục] 3 triệu\"", "\n\nExample: \"Create budget [category] 3 million\"");
                 return AiAssistantResponse.builder().intent("ADVICE").reply(reply).build();
             } else {
-                pending.category = null; // Clear to trigger re-selection
+                pending.category = null; // Xóa để kích hoạt chọn lại
                 pending.awaitingField = "CATEGORY";
                 String reply = responseGenerator.t(language,
                         String.format("Hạng mục **'%s'** thuộc loại THU. Vì bạn đang đặt ngân sách chi tiêu, hãy chọn một danh mục CHI bên dưới:", resolvedName),
@@ -1255,9 +1254,9 @@ public class AiAssistantService {
             }
         }
 
-        // Amount missing
+        // Thiếu số tiền (Amount)
         if (pending.amount == null || pending.amount.compareTo(BigDecimal.ZERO) <= 0) {
-            // Attempt extraction from message
+            // Thử trích xuất từ tin nhắn
             BigDecimal msgAmt = textPreprocessor.extractSingleAmount(parsed.getOriginalText());
             if (msgAmt != null) {
                 pending.amount = msgAmt;
@@ -1271,7 +1270,7 @@ public class AiAssistantService {
             }
         }
 
-        // CASE 2: Category + Amount detected but NO month -> ask which month
+        // TRƯỜNG HỢP 2: Đã phát hiện Danh mục + Số tiền nhưng CHƯA có tháng -> hỏi tháng nào
         if (pending.month == null || pending.month.isBlank()) {
             if (parsed.getStartDate() != null) {
                 pending.month = parsed.getStartDate().toString();
@@ -1290,7 +1289,7 @@ public class AiAssistantService {
             }
         }
 
-        // Determine dates from extracted data or current date if somehow fallback needed after keyword detected
+        // Xác định các ngày từ dữ liệu được trích xuất hoặc ngày hiện tại nếu cần dự phòng sau khi phát hiện từ khóa
         LocalDate today = LocalDate.now();
         LocalDate parsedDate = parseDate(pending.month, today);
         LocalDate start = parsedDate.withDayOfMonth(1);
@@ -1298,11 +1297,11 @@ public class AiAssistantService {
         
         String catName = categoryService.getIdToNameMap().get(catId);
         
-        // Is Confirmation?
+        // Có phải là Tin nhắn Xác nhận không?
         boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation)) || isRuleBasedConfirmation(parsed.getNormalizedText());
         if (!isConfirmation) {
             pending.awaitingField = "CONFIRMATION";
-            // CASE 1: Propose creating the budget
+            // TRƯỜNG HỢP 1: Đề xuất tạo ngân sách
             String reply = responseGenerator.t(language,
                     String.format("Bạn muốn tạo ngân sách:\n\nTháng: %d/%d\nHạng mục: %s\nSố tiền: %s\n\nBạn có muốn lưu ngân sách này không?",
                             start.getMonthValue(), start.getYear(), catName, responseGenerator.formatVnd(pending.amount, language)),
@@ -1311,7 +1310,7 @@ public class AiAssistantService {
             return AiAssistantResponse.builder().intent("CREATE_BUDGET").refreshRequired(false).reply(reply).build();
         }
 
-        // Action confirmed: Upsert budget
+        // Hành động đã được xác nhận: Lưu/Cập nhật ngân sách
         Optional<Budget> existing = budgetRepository
                 .findFirstByUserIdAndCategoryIdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
                         userId, catId, start, end);
@@ -1338,7 +1337,7 @@ public class AiAssistantService {
     }
 
     // ═════════════════════════════════════════════════════════
-    // INCOME TARGET SETTER
+    // THIẾT LẬP MỤC TIÊU THU NHẬP
     // ═════════════════════════════════════════════════════════
 
     private AiAssistantResponse handleCreateIncomeGoal(ParsedMessage parsed, GeminiParseResult gemini, Long userId,
@@ -1430,7 +1429,7 @@ public class AiAssistantService {
             }
         }
 
-        // Amount missing
+        // Thiếu số tiền (Amount)
         if (pending.amount == null || pending.amount.compareTo(BigDecimal.ZERO) <= 0) {
             // Attempt extraction from message
             BigDecimal msgAmt = textPreprocessor.extractSingleAmount(parsed.getOriginalText());
@@ -1446,7 +1445,7 @@ public class AiAssistantService {
             }
         }
 
-        // CASE 2: Category + Amount detected but NO month -> ask which month
+        // TRƯỜNG HỢP 2: Đã phát hiện Danh mục + Số tiền nhưng CHƯA có tháng -> hỏi tháng nào
         if (pending.month == null || pending.month.isBlank()) {
             if (parsed.getStartDate() != null) {
                 pending.month = parsed.getStartDate().toString();
@@ -1473,7 +1472,7 @@ public class AiAssistantService {
         
         String catName = categoryService.getIdToNameMap().get(catId);
 
-        // Is Confirmation?
+        // Có phải là Tin nhắn Xác nhận không?
         boolean isConfirmation = (gemini != null && Boolean.TRUE.equals(gemini.isConfirmation)) || isRuleBasedConfirmation(parsed.getNormalizedText());
         if (!isConfirmation) {
             pending.awaitingField = "CONFIRMATION";
@@ -1529,13 +1528,13 @@ public class AiAssistantService {
         return sb.toString();
     }
 
-    // ── DRAFT EXTRACTION HELPERS ──
+    // ── CÁC PHƯƠNG THỨC HỖ TRỢ TRÍCH XUẤT NHÁP ──
 
     private List<GeminiParsedEntry> extractDraftEntriesFromHistory(List<AiMessage> history) {
         if (history == null || history.isEmpty())
             return new ArrayList<>();
 
-        // Look for the last Assistant message that was a draft
+        // Tìm tin nhắn cuối cùng của Assistant là bản nháp
         for (int i = history.size() - 1; i >= 0; i--) {
             AiMessage m = history.get(i);
             if ("ASSISTANT".equalsIgnoreCase(m.getRole())) {
@@ -1568,10 +1567,10 @@ public class AiAssistantService {
             GeminiParsedEntry entry = new GeminiParsedEntry();
             entry.type = line.startsWith("+") ? "INCOME" : "EXPENSE";
 
-            // Remove prefix (- or +)
+            // Loại bỏ tiền tố (- hoặc +)
             String parts = line.substring(2).trim();
 
-            // Find amount and category: "30.000 đ • Ăn uống (Ăn phở)"
+            // Tìm số tiền và danh mục: "30.000 đ • Ăn uống (Ăn phở)"
             int dotIdx = parts.indexOf("•");
             if (dotIdx == -1)
                 return null;

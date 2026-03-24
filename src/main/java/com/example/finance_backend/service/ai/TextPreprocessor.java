@@ -13,14 +13,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Text pre-processing pipeline component.
- * Handles: text normalization, money extraction, date detection,
- * multi-transaction splitting, and language detection.
+ * Thành phần trong đường ống tiền xử lý văn bản.
+ * Xử lý: chuẩn hóa văn bản, trích xuất số tiền, phát hiện ngày tháng,
+ * tách các giao dịch đa tầng, và phát hiện ngôn ngữ.
  */
 @Component
 public class TextPreprocessor {
 
-    // ── Money patterns (order matters: most specific first) ──
+    // ── Các mẫu định dạng tiền (thứ tự quan trọng: cụ thể nhất trước) ──
     private static final Pattern PAT_TR_MIXED =
             Pattern.compile("(?:^|\\s)(\\d+)\\s*(?:tr(?:ieu|iệu)?|t)\\s*(\\d+)?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern PAT_TRAM =
@@ -38,22 +38,22 @@ public class TextPreprocessor {
     private static final Pattern PAT_NUM =
             Pattern.compile("(\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d+)?)\\s*(?:đ|d|vnd|vnđ)?", Pattern.CASE_INSENSITIVE);
 
-    // ── Multi-transaction splitters ──
+    // ── Bộ tách các giao dịch đa tầng ──
     private static final Pattern PAT_MULTI_TX =
             Pattern.compile("[,;]\\s*(?=[a-zA-ZÀ-ỹ])");
 
-    // ── Vietnamese keyword detection ──
+    // ── Phát hiện từ khóa tiếng Việt ──
     private static final List<String> ENGLISH_KEYWORDS = List.of(
             "today", "yesterday", "this month", "last month", "this year", "last year",
             "delete", "remove", "update", "change", "income", "expense", "spend", "spent",
             "buy", "purchase", "how much", "total", "average");
 
     // ═════════════════════════════════════════════════════════
-    // PUBLIC API
+    // API CÔNG KHAI
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Full preprocessing pipeline: normalize → extract amounts → detect dates → split multi-tx.
+     * Đường ống tiền xử lý đầy đủ: chuẩn hóa → trích xuất số tiền → phát hiện ngày tháng → tách đa giao dịch.
      */
     public ParsedMessage preprocess(String rawMessage, String requestedLanguage) {
         String message = rawMessage == null ? "" : rawMessage.trim();
@@ -75,10 +75,10 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // TEXT NORMALIZATION
+    // CHUẨN HÓA VĂN BẢN
     // ═════════════════════════════════════════════════════════
 
-    /** Removes Vietnamese diacritics and normalizes đ → d. */
+    /** Loại bỏ dấu tiếng Việt và chuẩn hóa đ → d. */
     public String normalizeVietnamese(String text) {
         if (text == null || text.isBlank()) return "";
         String normalized = Normalizer.normalize(text.toLowerCase(Locale.ROOT), Normalizer.Form.NFD);
@@ -88,7 +88,7 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // LANGUAGE DETECTION
+    // PHÁT HIỆN NGÔN NGỮ
     // ═════════════════════════════════════════════════════════
 
     public String detectLanguage(String requested, String message) {
@@ -115,16 +115,16 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // MONEY EXTRACTION
+    // TRÍCH XUẤT SỐ TIỀN
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Extracts all monetary amounts from the text.
-     * Supports: 50k, 1tr, 1.2tr, 2 triệu, 200 nghìn, 50.000đ, hai trăm rưỡi, etc.
+     * Trích xuất tất cả các số tiền từ văn bản.
+     * Hỗ trợ: 50k, 1tr, 1.2tr, 2 triệu, 200 nghìn, 50.000đ, hai trăm rưỡi, v.v.
      */
     public List<BigDecimal> extractAllAmounts(String text) {
         if (text == null || text.isBlank()) return List.of();
-        // For multi-transaction messages, extract from each sub-message
+        // Đối với các tin nhắn chứa nhiều giao dịch, thực hiện trích xuất từ mỗi tin nhắn con
         List<String> parts = splitMultiTransaction(text);
         if (parts.size() > 1) {
             List<BigDecimal> results = new ArrayList<>();
@@ -139,13 +139,13 @@ public class TextPreprocessor {
     }
 
     /**
-     * Extracts a single monetary amount from text. Returns null if no amount found.
+     * Trích xuất một số tiền duy nhất từ văn bản. Trả về null nếu không tìm thấy số tiền nào.
      */
     public BigDecimal extractSingleAmount(String text) {
         if (text == null || text.isBlank()) return null;
         String lower = text.toLowerCase(Locale.ROOT).trim();
 
-        // 1. "X triệu Y" (e.g., "1 triệu 2" → 1,200,000)
+        // 1. "X triệu Y" (VD: "1 triệu 2" → 1.200.000)
         Matcher m = PAT_TR_MIXED.matcher(lower);
         if (m.find()) {
             BigDecimal main = new BigDecimal(m.group(1)).multiply(BD_MILLION);
@@ -160,7 +160,7 @@ public class TextPreprocessor {
             return main;
         }
 
-        // 2. "X trăm Y" (e.g., "2 trăm rưỡi" → 250,000 in VN finance context)
+        // 2. "X trăm Y" (VD: "2 trăm rưỡi" → 250.000 trong ngữ cảnh tài chính VN)
         m = PAT_TRAM.matcher(lower);
         if (m.find()) {
             BigDecimal main = new BigDecimal(m.group(1)).multiply(BD_HUNDRED_K);
@@ -179,7 +179,7 @@ public class TextPreprocessor {
             return main;
         }
 
-        // 3. "X tỷ Y" (e.g., "1 tỷ 2" → 1,200,000,000)
+        // 3. "X tỷ Y" (VD: "1 tỷ 2" → 1.200.000.000)
         m = PAT_TY.matcher(lower);
         if (m.find()) {
             BigDecimal main = new BigDecimal(m.group(1)).multiply(BD_BILLION);
@@ -195,7 +195,7 @@ public class TextPreprocessor {
             return main;
         }
 
-        // 4. "X rưỡi" (e.g., "5k rưỡi" → 5,500)
+        // 4. "X rưỡi" (VD: "5k rưỡi" → 5.500)
         if (lower.contains(" rưỡi") || lower.contains(" ruoi") || lower.contains("rưỡi") || lower.contains("ruoi")) {
             m = PAT_RUOI.matcher(lower);
             if (m.find()) {
@@ -211,7 +211,7 @@ public class TextPreprocessor {
             }
         }
 
-        // 5. Standard units: k, tr, tỷ
+        // 5. Các đơn vị chuẩn: k, tr, tỷ
         m = PAT_K.matcher(lower);
         if (m.find()) {
             BigDecimal num = parseDecimal(m.group(1));
@@ -228,14 +228,14 @@ public class TextPreprocessor {
             return num != null ? num.multiply(BD_BILLION) : null;
         }
 
-        // 6. Plain number with optional currency suffix
+        // 6. Số thuần túy với hậu tố tiền tệ tùy chọn
         m = PAT_NUM.matcher(lower);
         if (m.find()) {
             String raw = m.group(1);
             String cleaned = raw.replaceAll("[.,]", "");
             try {
                 BigDecimal val = new BigDecimal(cleaned);
-                // Heuristic: small numbers in food context likely mean thousands
+                // Suy nghiệm: các số nhỏ trong ngữ cảnh ăn uống thường có nghĩa là hàng nghìn
                 if (val.compareTo(BD_THOUSAND) < 0 && containsFoodContext(lower)) {
                     return val.multiply(BD_THOUSAND);
                 }
@@ -248,31 +248,31 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // DATE DETECTION
+    // PHÁT HIỆN NGÀY THÁNG
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Detects date range from normalized text.
-     * Returns [start, end] array. Both may be null if no date detected.
+     * Phát hiện khoảng ngày từ văn bản đã chuẩn hóa.
+     * Trả về mảng [bắt đầu, kết thúc]. Cả hai có thể là null nếu không phát hiện được ngày nào.
      */
     public LocalDate[] detectDateRange(String normalizedText) {
         if (normalizedText == null) return new LocalDate[]{null, null};
         LocalDate today = LocalDate.now();
 
-        // 1. Specific year detection
+        // 1. Phát hiện năm cụ thể
         Matcher yearMatcher = Pattern.compile("\\b(nam|year)\\s+(\\d{4})\\b", Pattern.CASE_INSENSITIVE).matcher(normalizedText);
         Integer forcedYear = null;
         if (yearMatcher.find()) {
             forcedYear = Integer.parseInt(yearMatcher.group(2));
         }
 
-        // 2. Specific month (e.g., "thang 4", "thang 12", "month 6")
+        // 2. Phát hiện tháng cụ thể (VD: "thang 4", "thang 12", "month 6")
         Matcher monthMatcher = Pattern.compile("\\b(thang|month|t)\\s*(\\d{1,2})\\b", Pattern.CASE_INSENSITIVE).matcher(normalizedText);
         if (monthMatcher.find()) {
             int month = Integer.parseInt(monthMatcher.group(2));
             if (month >= 1 && month <= 12) {
                 int year = forcedYear != null ? forcedYear : today.getYear();
-                // If the month is for next year (e.g. today is Dec, user says Jan)
+                // Nếu tháng thuộc năm sau (VD: hôm nay là tháng 12, người dùng nói tháng 1)
                 if (forcedYear == null && month < today.getMonthValue() && today.getMonthValue() >= 10) {
                     year++;
                 }
@@ -281,53 +281,53 @@ public class TextPreprocessor {
             }
         }
 
-        // Today
+        // Hôm nay
         if (containsAny(normalizedText, "hom nay", "vua nay", "vua moi", "chieu nay",
                 "sang nay", "toi nay", "today", "this morning", "this afternoon",
                 "this evening", "tonight")) {
             return new LocalDate[]{today, today};
         }
-        // Yesterday
+        // Hôm qua
         if (normalizedText.contains("hom qua") || normalizedText.contains("yesterday")) {
             LocalDate d = today.minusDays(1);
             return new LocalDate[]{d, d};
         }
-        // Day before yesterday
+        // Hôm kia
         if (normalizedText.contains("hom kia")) {
             LocalDate d = today.minusDays(2);
             return new LocalDate[]{d, d};
         }
-        // This week
+        // Tuần này
         if (normalizedText.contains("tuan nay") || normalizedText.contains("this week")) {
             LocalDate start = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             return new LocalDate[]{start, today};
         }
-        // Last week
+        // Tuần trước
         if (normalizedText.contains("tuan truoc") || normalizedText.contains("last week")) {
             LocalDate weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             LocalDate end = weekStart.minusDays(1);
             LocalDate start = end.minusDays(6);
             return new LocalDate[]{start, end};
         }
-        // This month
+        // Tháng này
         if (containsAny(normalizedText, "thang nay", "this month", "current month")) {
             return new LocalDate[]{today.withDayOfMonth(1), today};
         }
-        // Last month
+        // Tháng trước
         if (containsAny(normalizedText, "thang truoc", "last month", "previous month")) {
             LocalDate prev = today.minusMonths(1);
             return new LocalDate[]{prev.withDayOfMonth(1), prev.withDayOfMonth(prev.lengthOfMonth())};
         }
-        // Next month
+        // Tháng sau
         if (containsAny(normalizedText, "thang sau", "thang toi", "next month")) {
             LocalDate next = today.plusMonths(1);
             return new LocalDate[]{next.withDayOfMonth(1), next.withDayOfMonth(next.lengthOfMonth())};
         }
-        // This year
+        // Năm nay
         if (normalizedText.contains("nam nay") || normalizedText.contains("this year")) {
             return new LocalDate[]{LocalDate.of(today.getYear(), 1, 1), today};
         }
-        // Last year
+        // Năm ngoái
         if (containsAny(normalizedText, "nam ngoai", "last year", "previous year")) {
             int year = today.getYear() - 1;
             return new LocalDate[]{LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31)};
@@ -336,7 +336,7 @@ public class TextPreprocessor {
     }
 
     /**
-     * Detects a single date from text. Returns fallback if none found.
+     * Phát hiện một ngày duy nhất từ văn bản. Trả về fallback nếu không tìm thấy.
      */
     public LocalDate detectSingleDate(String text, LocalDate fallback) {
         if (text == null) return fallback;
@@ -346,11 +346,11 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // MULTI-TRANSACTION SPLITTING
+    // TÁCH GIAO DỊCH ĐA TẦNG
     // ═════════════════════════════════════════════════════════
 
     /**
-     * Splits a multi-transaction message into individual sub-messages.
+     * Tách một tin nhắn chứa nhiều giao dịch thành các tin nhắn con riêng lẻ.
      * "sáng ăn phở 45k, cà phê 30k" → ["sáng ăn phở 45k", "cà phê 30k"]
      */
     public List<String> splitMultiTransaction(String message) {
@@ -365,7 +365,7 @@ public class TextPreprocessor {
     }
 
     // ═════════════════════════════════════════════════════════
-    // UTILITY HELPERS
+    // PHƯƠNG THỨC HỖ TRỢ CHI TIẾT
     // ═════════════════════════════════════════════════════════
 
     private static final BigDecimal BD_THOUSAND = new BigDecimal("1000");
