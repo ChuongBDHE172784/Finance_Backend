@@ -37,5 +37,6 @@ public class CreateEntryRequest {
     private String imageUrl;
     private Double latitude;
     private Double longitude;
+    private String locationName;
     private String source; // MANUAL, OCR, VOICE, CLIPBOARD
 }

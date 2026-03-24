@@ -23,6 +23,7 @@ public class FinancialEntryDto {
     private String imageUrl;
     private Double latitude;
     private Double longitude;
+    private String locationName;
     private String type;
     private Long accountId;
     private String accountName;
@@ -47,6 +48,7 @@ public class FinancialEntryDto {
                 .imageUrl(e.getImageUrl())
                 .latitude(e.getLatitude())
                 .longitude(e.getLongitude())
+                .locationName(e.getLocationName())
                 .type(e.getType() != null ? e.getType().name() : "EXPENSE")
                 .accountId(e.getAccountId())
                 .accountName(account != null ? account.getName() : "")

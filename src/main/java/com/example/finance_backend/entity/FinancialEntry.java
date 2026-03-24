@@ -50,6 +50,9 @@ public class FinancialEntry {
     @Column(name = "longitude")
     private Double longitude;
 
+    @Column(name = "location_name", length = 500)
+    private String locationName;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private EntrySource source;

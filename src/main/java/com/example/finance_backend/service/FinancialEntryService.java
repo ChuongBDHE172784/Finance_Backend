@@ -97,6 +97,7 @@ public class FinancialEntryService {
                 .imageUrl(req.getImageUrl())
                 .latitude(req.getLatitude())
                 .longitude(req.getLongitude())
+                .locationName(req.getLocationName())
                 .source(source != null ? source : EntrySource.MANUAL)
                 .userId(userId)
                 .build();
@@ -169,6 +170,7 @@ public class FinancialEntryService {
         e.setImageUrl(req.getImageUrl());
         e.setLatitude(req.getLatitude());
         e.setLongitude(req.getLongitude());
+        e.setLocationName(req.getLocationName());
         e.setSource(source != null ? source : EntrySource.MANUAL);
 
         e = entryRepository.save(e);
