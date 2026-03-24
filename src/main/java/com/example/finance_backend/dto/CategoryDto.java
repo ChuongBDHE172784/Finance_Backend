@@ -16,6 +16,7 @@ public class CategoryDto {
     private String iconName;
     private String colorHex;
     private Integer sortOrder;
+    private boolean fixed;
 
     public static CategoryDto fromEntity(Category c) {
         return CategoryDto.builder()
@@ -25,6 +26,7 @@ public class CategoryDto {
                 .iconName(c.getIconName())
                 .colorHex(c.getColorHex())
                 .sortOrder(c.getSortOrder())
+                .fixed("Khác".equalsIgnoreCase(c.getName()) || "Khác (Thu nhập)".equalsIgnoreCase(c.getName()))
                 .build();
     }
 }

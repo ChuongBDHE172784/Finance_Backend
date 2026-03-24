@@ -2,7 +2,9 @@ package com.example.finance_backend.repository;
 
 import com.example.finance_backend.entity.FinancialEntry;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -62,4 +64,8 @@ public interface FinancialEntryRepository extends JpaRepository<FinancialEntry, 
     List<BigDecimal> findAmountsByUserAndTypeAndDateRange(Long userId,
             com.example.finance_backend.entity.EntryType type,
             LocalDate start, LocalDate end);
+    @Modifying
+    @Transactional
+    @Query("UPDATE FinancialEntry e SET e.categoryId = :newCategoryId WHERE e.categoryId = :oldCategoryId")
+    void updateCategoryId(Long oldCategoryId, Long newCategoryId);
 }

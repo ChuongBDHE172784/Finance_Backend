@@ -4,10 +4,12 @@ import com.example.finance_backend.dto.CreateEntryRequest;
 import com.example.finance_backend.dto.FinancialEntryDto;
 import com.example.finance_backend.entity.EntrySource;
 import com.example.finance_backend.entity.EntryType;
+import com.example.finance_backend.entity.Category;
 import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.repository.FinancialEntryRepository;
 import com.example.finance_backend.repository.AccountRepository;
+import com.example.finance_backend.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,45 +25,46 @@ public class FinancialEntryService {
 
     private final FinancialEntryRepository entryRepository;
     private final AccountRepository accountRepository;
+    private final CategoryRepository categoryRepository;
     private final CategoryService categoryService;
 
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findAll(Long userId) {
         if (userId == null) return List.of();
-        var idToCatName = categoryService.getIdToNameMap();
-        var idToAccName = getAccountIdToNameMap(userId);
+        var idToCat = categoryService.getIdToCategoryMap();
+        var idToAcc = getAccountIdToAccountMap(userId);
         return entryRepository.findByUserIdOrderByTransactionDateDescCreatedAtDesc(userId).stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, 
-                        idToCatName.getOrDefault(e.getCategoryId(), ""),
-                        idToAccName.getOrDefault(e.getAccountId(), ""),
-                        idToAccName.getOrDefault(e.getToAccountId(), "")))
+                        idToCat.get(e.getCategoryId()),
+                        idToAcc.get(e.getAccountId()),
+                        idToAcc.get(e.getToAccountId())))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findByDateRange(Long userId, LocalDate start, LocalDate end) {
         if (userId == null) return List.of();
-        var idToCatName = categoryService.getIdToNameMap();
-        var idToAccName = getAccountIdToNameMap(userId);
+        var idToCat = categoryService.getIdToCategoryMap();
+        var idToAcc = getAccountIdToAccountMap(userId);
         return entryRepository.findByUserIdAndTransactionDateBetweenOrderByTransactionDateDescCreatedAtDesc(userId, start, end)
                 .stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, 
-                        idToCatName.getOrDefault(e.getCategoryId(), ""),
-                        idToAccName.getOrDefault(e.getAccountId(), ""),
-                        idToAccName.getOrDefault(e.getToAccountId(), "")))
+                        idToCat.get(e.getCategoryId()),
+                        idToAcc.get(e.getAccountId()),
+                        idToAcc.get(e.getToAccountId())))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<FinancialEntryDto> findByTag(Long userId, String tag) {
         if (userId == null) return List.of();
-        var idToCatName = categoryService.getIdToNameMap();
-        var idToAccName = getAccountIdToNameMap(userId);
+        var idToCat = categoryService.getIdToCategoryMap();
+        var idToAcc = getAccountIdToAccountMap(userId);
         return entryRepository.findByUserIdAndTagContaining(userId, tag).stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, 
-                        idToCatName.getOrDefault(e.getCategoryId(), ""),
-                        idToAccName.getOrDefault(e.getAccountId(), ""),
-                        idToAccName.getOrDefault(e.getToAccountId(), "")))
+                        idToCat.get(e.getCategoryId()),
+                        idToAcc.get(e.getAccountId()),
+                        idToAcc.get(e.getToAccountId())))
                 .collect(Collectors.toList());
     }
 
@@ -70,10 +73,10 @@ public class FinancialEntryService {
         return entryRepository.findById(id)
                 .filter(e -> userId == null || userId.equals(e.getUserId()))
                 .map(e -> {
-                    String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-                    String accName = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).map(Account::getName).orElse("") : "";
-                    String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
-                    return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
+                    Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
+                    Account acc = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).orElse(null) : null;
+                    Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
+                    return FinancialEntryDto.fromEntity(e, cat, acc, toAcc);
                 });
     }
 
@@ -125,10 +128,9 @@ public class FinancialEntryService {
         accountRepository.save(account);
 
         e = entryRepository.save(e);
-        String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-        String accName = account.getName();
-        String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
-        return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
+        Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
+        Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
+        return FinancialEntryDto.fromEntity(e, cat, account, toAcc);
     }
 
     @Transactional
@@ -191,10 +193,9 @@ public class FinancialEntryService {
         e.setSource(source != null ? source : EntrySource.MANUAL);
 
         e = entryRepository.save(e);
-        String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-        String accName = newAccount.getName();
-        String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
-        return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
+        Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
+        Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
+        return FinancialEntryDto.fromEntity(e, cat, newAccount, toAcc);
     }
 
     @Transactional
@@ -218,10 +219,10 @@ public class FinancialEntryService {
             java.nio.file.Files.copy(file.getInputStream(), path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             e.setImageUrl("/" + dir + filename);
             e = entryRepository.save(e);
-            String catName = categoryService.getIdToNameMap().getOrDefault(e.getCategoryId(), "");
-            String accName = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).map(Account::getName).orElse("") : "";
-            String toAccName = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).map(Account::getName).orElse("") : "";
-            return FinancialEntryDto.fromEntity(e, catName, accName, toAccName);
+            Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
+            Account acc = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).orElse(null) : null;
+            Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
+            return FinancialEntryDto.fromEntity(e, cat, acc, toAcc);
         } catch (java.io.IOException ex) {
             throw new RuntimeException("Upload failed", ex);
         }
@@ -262,10 +263,10 @@ public class FinancialEntryService {
         }
     }
 
-    private java.util.Map<Long, String> getAccountIdToNameMap(Long userId) {
+    private java.util.Map<Long, Account> getAccountIdToAccountMap(Long userId) {
         // Lấy tất cả ví của user bao gồm cả ví đã xóa (soft delete) để hiển thị lịch sử
         return accountRepository.findAll().stream()
                 .filter(a -> userId == null || userId.equals(a.getUserId()))
-                .collect(Collectors.toMap(Account::getId, Account::getName, (v1, v2) -> v1));
+                .collect(Collectors.toMap(Account::getId, a -> a, (v1, v2) -> v1));
     }
 }

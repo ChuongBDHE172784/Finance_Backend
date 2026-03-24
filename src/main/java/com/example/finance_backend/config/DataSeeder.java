@@ -63,7 +63,7 @@ public class DataSeeder implements ApplicationRunner {
     }
 
     private void ensureCategory(String name, String icon, String color, int order, com.example.finance_backend.entity.EntryType type, List<String> aliases) {
-        Optional<Category> existing = categoryRepository.findByName(name);
+        Optional<Category> existing = categoryRepository.findByNameIgnoreCase(name);
         if (existing.isPresent()) {
             Category c = existing.get();
             if (c.getType() == null) {
@@ -74,7 +74,7 @@ public class DataSeeder implements ApplicationRunner {
         }
 
         for (String alias : aliases) {
-            Optional<Category> aliasCategory = categoryRepository.findByName(alias);
+            Optional<Category> aliasCategory = categoryRepository.findByNameIgnoreCase(alias);
             if (aliasCategory.isPresent()) {
                 Category c = aliasCategory.get();
                 c.setName(name);
