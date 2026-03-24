@@ -18,9 +18,11 @@ public class AccountController {
     private final AccountService accountService;
 
     @GetMapping
-    public ResponseEntity<List<Account>> getAll(@RequestHeader(value = "X-User-Id", required = false) String userIdStr) {
+    public ResponseEntity<List<Account>> getAll(
+            @RequestHeader(value = "X-User-Id", required = false) String userIdStr,
+            @RequestParam(name = "includeDeleted", defaultValue = "false") boolean includeDeleted) {
         Long userId = parseUserId(userIdStr);
-        return ResponseEntity.ok(accountService.findAll(userId));
+        return ResponseEntity.ok(accountService.findAll(userId, includeDeleted));
     }
 
     @PostMapping
@@ -58,12 +60,8 @@ public class AccountController {
             @PathVariable Long id,
             @RequestHeader(value = "X-User-Id", required = false) String userIdStr) {
         Long userId = parseUserId(userIdStr);
-        try {
-            accountService.deleteById(id, userId);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.CONFLICT).body(e.getMessage());
-        }
+        accountService.deleteById(id, userId);
+        return ResponseEntity.noContent().build();
     }
 
     private Long parseUserId(String s) {

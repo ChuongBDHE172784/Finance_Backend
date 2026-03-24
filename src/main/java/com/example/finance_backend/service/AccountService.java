@@ -15,14 +15,23 @@ public class AccountService {
     private final AccountRepository accountRepository;
 
     @Transactional(readOnly = true)
-    public List<Account> findAll(Long userId) {
+    public List<Account> findAll(Long userId, boolean includeDeleted) {
         if (userId == null) return List.of();
+        if (includeDeleted) {
+            return accountRepository.findByUserIdOrderByIsDeletedAscNameAsc(userId);
+        }
         return accountRepository.findByUserIdAndIsDeletedFalseOrderByNameAsc(userId);
     }
 
     @Transactional
     public Account create(Account account, Long userId) {
         if (userId != null) account.setUserId(userId);
+        
+        // Kiểm tra xem đã có ví/tài khoản nào cùng tên mà chưa bị xóa không
+        if (accountRepository.existsByUserIdAndNameAndIsDeletedFalse(userId, account.getName())) {
+            throw new IllegalArgumentException("Đã tồn tại ví/tài khoản với tên này.");
+        }
+        
         return accountRepository.save(account);
     }
 
@@ -36,6 +45,14 @@ public class AccountService {
         if (existing.isDeleted()) {
             throw new IllegalStateException("Cannot update a deleted account");
         }
+        
+        // Nếu thay đổi tên, kiểm tra xem tên mới đã tồn tại trong các ví đang hoạt động chưa
+        if (!existing.getName().equals(account.getName())) {
+            if (accountRepository.existsByUserIdAndNameAndIsDeletedFalse(userId, account.getName())) {
+                throw new IllegalArgumentException("Tên ví/tài khoản này đã tồn tại.");
+            }
+        }
+        
         existing.setName(account.getName());
         existing.setBalance(account.getBalance() != null ? account.getBalance() : existing.getBalance());
         if (account.getIconName() != null) existing.setIconName(account.getIconName());

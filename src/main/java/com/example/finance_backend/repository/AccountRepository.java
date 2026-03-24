@@ -11,7 +11,11 @@ import java.util.List;
 public interface AccountRepository extends JpaRepository<Account, Long> {
 
     List<Account> findByUserIdAndIsDeletedFalseOrderByNameAsc(Long userId);
+    
+    List<Account> findByUserIdOrderByIsDeletedAscNameAsc(Long userId);
 
     @Query("SELECT a FROM Account a WHERE a.userId = :userId AND a.isDeleted = false ORDER BY a.name ASC")
     List<Account> findAllActiveByUserId(Long userId);
+
+    boolean existsByUserIdAndNameAndIsDeletedFalse(Long userId, String name);
 }
