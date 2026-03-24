@@ -26,5 +26,5 @@ public class CreateCategoryRequest {
     @Size(max = 20)
     private String colorHex;
 
-    private Integer sortOrder;
 }
+

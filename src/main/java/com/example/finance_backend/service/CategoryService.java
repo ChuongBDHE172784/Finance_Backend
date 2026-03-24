@@ -37,7 +37,7 @@ public class CategoryService {
     }
 
     public List<CategoryDto> findAll() {
-        return categoryRepository.findAllByOrderBySortOrderAsc().stream()
+        return categoryRepository.findAll().stream()
                 .map(CategoryDto::fromEntity)
                 .collect(Collectors.toList());
     }
@@ -79,20 +79,11 @@ public class CategoryService {
                 responseGenerator.t(lang, "Danh mục với tên '" + trimmedName + "' đã tồn tại.", "Category name '" + trimmedName + "' already exists.", "「" + trimmedName + "」という名前のカテゴリは既に存在します。", "이름이 '" + trimmedName + "'인 카테고리가 이미 존재합니다.", "名称为 “" + trimmedName + "” 的类别已存在。"));
         }
         
-        Integer sortOrder = req.getSortOrder();
-        if (sortOrder == null) {
-            long maxOrder = categoryRepository.findAll().stream()
-                    .mapToLong(c -> c.getSortOrder() != null ? c.getSortOrder() : 0)
-                    .max()
-                    .orElse(0);
-            sortOrder = (int) maxOrder + 1;
-        }
         Category c = Category.builder()
                 .name(req.getName().trim())
                 .type(req.getType())
                 .iconName(req.getIconName() != null ? req.getIconName().trim() : null)
                 .colorHex(req.getColorHex() != null ? req.getColorHex().trim() : null)
-                .sortOrder(sortOrder)
                 .build();
         c = categoryRepository.save(c);
         invalidateCache();
@@ -126,9 +117,6 @@ public class CategoryService {
         c.setType(req.getType());
         c.setIconName(req.getIconName() != null ? req.getIconName().trim() : null);
         c.setColorHex(req.getColorHex() != null ? req.getColorHex().trim() : null);
-        if (req.getSortOrder() != null) {
-            c.setSortOrder(req.getSortOrder());
-        }
         c = categoryRepository.save(c);
         invalidateCache();
         return CategoryDto.fromEntity(c);
@@ -153,7 +141,6 @@ public class CategoryService {
                         .type(deletedType)
                         .iconName(deletedType == EntryType.INCOME ? "attach_money" : "category")
                         .colorHex(deletedType == EntryType.INCOME ? "4CAF50" : "009688")
-                        .sortOrder(99)
                         .build()));
 
         financialEntryRepository.updateCategoryId(id, fallbackCategory.getId());

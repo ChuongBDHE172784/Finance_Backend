@@ -36,19 +36,10 @@ public class FinancialEntry {
     @Column(name = "account_id")
     private Long accountId;
 
-    @Column(name = "to_account_id")
-    private Long toAccountId;
 
     @Column(name = "transaction_date", nullable = false)
     private LocalDate transactionDate;
 
-    /** Tags extracted from note, e.g. #an_uong #mua_sam - stored as comma-separated */
-    @Column(length = 500)
-    private String tags;
-
-    /** Mentions extracted from note, e.g. @tiec_nuong - stored as comma-separated */
-    @Column(length = 500)
-    private String mentions;
 
     @Column(name = "image_url", length = 1000)
     private String imageUrl;

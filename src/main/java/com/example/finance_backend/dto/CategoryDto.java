@@ -15,7 +15,6 @@ public class CategoryDto {
     private EntryType type;
     private String iconName;
     private String colorHex;
-    private Integer sortOrder;
     private boolean fixed;
 
     public static CategoryDto fromEntity(Category c) {
@@ -25,7 +24,6 @@ public class CategoryDto {
                 .type(c.getType())
                 .iconName(c.getIconName())
                 .colorHex(c.getColorHex())
-                .sortOrder(c.getSortOrder())
                 .fixed("Khác".equalsIgnoreCase(c.getName()) || "Khác (Thu nhập)".equalsIgnoreCase(c.getName()))
                 .build();
     }

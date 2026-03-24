@@ -36,8 +36,7 @@ public class FinancialEntryService {
         return entryRepository.findByUserIdOrderByTransactionDateDescCreatedAtDesc(userId).stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, 
                         idToCat.get(e.getCategoryId()),
-                        idToAcc.get(e.getAccountId()),
-                        idToAcc.get(e.getToAccountId())))
+                        idToAcc.get(e.getAccountId())))
                 .collect(Collectors.toList());
     }
 
@@ -50,23 +49,10 @@ public class FinancialEntryService {
                 .stream()
                 .map(e -> FinancialEntryDto.fromEntity(e, 
                         idToCat.get(e.getCategoryId()),
-                        idToAcc.get(e.getAccountId()),
-                        idToAcc.get(e.getToAccountId())))
+                        idToAcc.get(e.getAccountId())))
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
-    public List<FinancialEntryDto> findByTag(Long userId, String tag) {
-        if (userId == null) return List.of();
-        var idToCat = categoryService.getIdToCategoryMap();
-        var idToAcc = getAccountIdToAccountMap(userId);
-        return entryRepository.findByUserIdAndTagContaining(userId, tag).stream()
-                .map(e -> FinancialEntryDto.fromEntity(e, 
-                        idToCat.get(e.getCategoryId()),
-                        idToAcc.get(e.getAccountId()),
-                        idToAcc.get(e.getToAccountId())))
-                .collect(Collectors.toList());
-    }
 
     @Transactional(readOnly = true)
     public Optional<FinancialEntryDto> findById(Long id, Long userId) {
@@ -75,8 +61,7 @@ public class FinancialEntryService {
                 .map(e -> {
                     Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
                     Account acc = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).orElse(null) : null;
-                    Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
-                    return FinancialEntryDto.fromEntity(e, cat, acc, toAcc);
+                    return FinancialEntryDto.fromEntity(e, cat, acc);
                 });
     }
 
@@ -108,10 +93,7 @@ public class FinancialEntryService {
                 .note(req.getNote())
                 .categoryId(req.getCategoryId())
                 .accountId(req.getAccountId())
-                .toAccountId(req.getToAccountId())
                 .transactionDate(date)
-                .tags(join(req.getTags()))
-                .mentions(join(req.getMentions()))
                 .imageUrl(req.getImageUrl())
                 .latitude(req.getLatitude())
                 .longitude(req.getLongitude())
@@ -129,8 +111,7 @@ public class FinancialEntryService {
 
         e = entryRepository.save(e);
         Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
-        Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
-        return FinancialEntryDto.fromEntity(e, cat, account, toAcc);
+        return FinancialEntryDto.fromEntity(e, cat, account);
     }
 
     @Transactional
@@ -185,8 +166,6 @@ public class FinancialEntryService {
         e.setAccountId(req.getAccountId());
         e.setType(newType);
         e.setTransactionDate(req.getTransactionDate());
-        e.setTags(join(req.getTags()));
-        e.setMentions(join(req.getMentions()));
         e.setImageUrl(req.getImageUrl());
         e.setLatitude(req.getLatitude());
         e.setLongitude(req.getLongitude());
@@ -194,8 +173,7 @@ public class FinancialEntryService {
 
         e = entryRepository.save(e);
         Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
-        Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
-        return FinancialEntryDto.fromEntity(e, cat, newAccount, toAcc);
+        return FinancialEntryDto.fromEntity(e, cat, newAccount);
     }
 
     @Transactional
@@ -221,8 +199,7 @@ public class FinancialEntryService {
             e = entryRepository.save(e);
             Category cat = categoryRepository.findById(e.getCategoryId()).orElse(null);
             Account acc = e.getAccountId() != null ? accountRepository.findById(e.getAccountId()).orElse(null) : null;
-            Account toAcc = e.getToAccountId() != null ? accountRepository.findById(e.getToAccountId()).orElse(null) : null;
-            return FinancialEntryDto.fromEntity(e, cat, acc, toAcc);
+            return FinancialEntryDto.fromEntity(e, cat, acc);
         } catch (java.io.IOException ex) {
             throw new RuntimeException("Upload failed", ex);
         }
@@ -249,10 +226,6 @@ public class FinancialEntryService {
         }
     }
 
-    private static String join(List<String> list) {
-        if (list == null || list.isEmpty()) return null;
-        return list.stream().map(s -> s.replace(",", "_")).collect(Collectors.joining(","));
-    }
 
     private static EntrySource parseSource(String s) {
         if (s == null || s.isBlank()) return EntrySource.MANUAL;

@@ -25,12 +25,8 @@ public class FinancialEntryController {
     public ResponseEntity<List<FinancialEntryDto>> getAll(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) String tag
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        if (tag != null && !tag.isBlank()) {
-            return ResponseEntity.ok(entryService.findByTag(userId, tag.trim()));
-        }
         if (from != null && to != null) {
             return ResponseEntity.ok(entryService.findByDateRange(userId, from, to));
         }

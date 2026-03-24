@@ -29,6 +29,5 @@ public class Category {
     @Column(name = "color_hex", length = 20)
     private String colorHex;
 
-    @Column(name = "sort_order")
-    private Integer sortOrder;
 }
+

@@ -6,7 +6,6 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
 
 @Getter
 @Setter
@@ -27,7 +26,6 @@ public class CreateEntryRequest {
     @NotNull
     private Long accountId;
 
-    private Long toAccountId;
 
     @NotNull
     private String type; // INCOME, EXPENSE, TRANSFER
@@ -35,10 +33,7 @@ public class CreateEntryRequest {
     @NotNull(message = "Transaction date is required")
     private LocalDate transactionDate;
 
-    @jakarta.validation.constraints.Size(max = 20, message = "Quá nhiều tags")
-    private List<String> tags;
-    @jakarta.validation.constraints.Size(max = 20, message = "Quá nhiều mentions")
-    private List<String> mentions;
+
     private String imageUrl;
     private Double latitude;
     private Double longitude;
