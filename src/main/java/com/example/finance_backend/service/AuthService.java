@@ -153,6 +153,10 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu cũ không chính xác");
         }
 
+        if (oldPassword.equals(newPassword)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu mới phải khác mật khẩu cũ");
+        }
+
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
     }
