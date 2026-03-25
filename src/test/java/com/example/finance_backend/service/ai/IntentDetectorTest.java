@@ -6,9 +6,6 @@ import com.example.finance_backend.dto.ParsedMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -148,5 +145,35 @@ public class IntentDetectorTest {
     void testFinancialScoreIntent_English() {
         IntentResult result = detector.detect(parse("what is my financial score"));
         assertEquals(Intent.FINANCIAL_SCORE, result.getIntent());
+    }
+
+    @Test
+    void testCreateSchedule_RepeatKeyword() {
+        IntentResult result = detector.detect(parse("trả tiền netflix 180k mỗi tháng"));
+        assertEquals(Intent.CREATE_SCHEDULE, result.getIntent());
+    }
+
+    @Test
+    void testCreateSchedule_ExplicitKeywords() {
+        IntentResult result = detector.detect(parse("nhắc tôi đổ xăng 50k định kỳ"));
+        assertEquals(Intent.CREATE_SCHEDULE, result.getIntent());
+    }
+
+    @Test
+    void testDisableSchedule() {
+        IntentResult result = detector.detect(parse("tạm dừng lịch netflix"));
+        assertEquals(Intent.DISABLE_SCHEDULE, result.getIntent());
+    }
+
+    @Test
+    void testUpcomingTransactions() {
+        IntentResult result = detector.detect(parse("tháng này mình còn khoản nào phải trả nữa không"));
+        assertEquals(Intent.LIST_UPCOMING_TRANSACTIONS, result.getIntent());
+    }
+
+    @Test
+    void testExplainTransactionSource() {
+        IntentResult result = detector.detect(parse("khoản netflix này từ đâu ra thế"));
+        assertEquals(Intent.EXPLAIN_TRANSACTION_SOURCE, result.getIntent());
     }
 }

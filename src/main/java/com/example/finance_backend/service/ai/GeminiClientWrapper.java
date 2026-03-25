@@ -59,34 +59,57 @@ public class GeminiClientWrapper {
      */
     public GeminiParseResult parse(String message, String base64Image,
             List<AiMessage> history, String language) {
-        try {
-            LocalDate today = LocalDate.now();
-            String categoriesStr = categoryService.findAll().stream()
-                    .map(c -> c.getName())
-                    .collect(Collectors.joining(", "));
-            String historyBlock = formatHistory(history, language);
+        int maxRetries = 1;
+        int attempt = 0;
+        
+        while (attempt <= maxRetries) {
+            try {
+                LocalDate today = LocalDate.now();
+                String categoriesStr = categoryService.findAll().stream()
+                        .map(c -> c.getName())
+                        .collect(Collectors.joining(", "));
+                String historyBlock = formatHistory(history, language);
 
-            String prompt = buildPrompt(language, today, categoriesStr, historyBlock, message);
-            GenerateContentResponse response;
+                String prompt = buildPrompt(language, today, categoriesStr, historyBlock, message);
+                GenerateContentResponse response;
 
-            if (base64Image != null && !base64Image.isBlank()) {
-                response = callMultimodal(prompt, base64Image);
-            } else {
-                response = getClient().models.generateContent(model, prompt, null);
+                if (base64Image != null && !base64Image.isBlank()) {
+                    response = callMultimodal(prompt, base64Image);
+                } else {
+                    response = getClient().models.generateContent(model, prompt, null);
+                }
+
+                String text = response.text();
+                if (text == null)
+                    return null;
+
+                String json = extractJson(text);
+                ObjectMapper mapper = objectMapper.copy();
+                mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                return mapper.readValue(json, GeminiParseResult.class);
+            } catch (Throwable t) {
+                String errorMsg = t.getMessage() != null ? t.getMessage() : "Unknown error";
+                boolean isRateLimit = errorMsg.contains("429") || errorMsg.contains("quota");
+
+                if (isRateLimit && attempt < maxRetries) {
+                    attempt++;
+                    log.warn("Gemini Rate Limit hit (429), retrying in 2s... (Attempt {}/{})", attempt, maxRetries);
+                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                    continue;
+                }
+
+                if (isRateLimit) {
+                    log.warn("Gemini Rate Limit hit (429) after {} retries: {}", attempt, errorMsg);
+                    GeminiParseResult res = new GeminiParseResult();
+                    res.isRateLimited = true;
+                    return res;
+                } else {
+                    log.error("Gemini parse failed for message: {}. Error: {}", message, errorMsg, t);
+                    return null;
+                }
             }
-
-            String text = response.text();
-            if (text == null)
-                return null;
-
-            String json = extractJson(text);
-            ObjectMapper mapper = objectMapper.copy();
-            mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-            return mapper.readValue(json, GeminiParseResult.class);
-        } catch (Exception e) {
-            log.warn("Gemini parse failed for message: {}", message, e);
-            return null;
         }
+        return null; // Should not reach here
     }
 
     // ═════════════════════════════════════════════════════════
@@ -130,23 +153,27 @@ public class GeminiClientWrapper {
                 OUTPUT REQUIREMENTS:
                 - Return ONLY pure JSON, no markdown, no extra explanation.
                 - Use YYYY-MM-DD date format.
-                - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), CREATE_BUDGET (set an expense budget limit), CREATE_INCOME_GOAL (set an income target/goal), VIEW_FINANCIAL_PLAN (view budget and goals overview).
+                - Identify intent: INSERT (add transaction), QUERY (look up), UPDATE (edit), DELETE (remove), ADVICE (general chat/advice), CREATE_BUDGET (set an expense budget limit), CREATE_INCOME_GOAL (set an income target/goal), VIEW_FINANCIAL_PLAN (view budget and goals overview), CREATE_SCHEDULE, UPDATE_SCHEDULE, DELETE_SCHEDULE, DISABLE_SCHEDULE, ENABLE_SCHEDULE, LIST_SCHEDULES, LIST_UPCOMING_TRANSACTIONS, EXPLAIN_TRANSACTION_SOURCE.
                 - For CREATE_BUDGET: use entries[0] for categoryName and limit amount. Category MUST be EXPENSE type.
                 - For CREATE_INCOME_GOAL: use entries[0] for categoryName and target amount. Category MUST be INCOME type.
                 - "Budget" / "Expense Limit" = CREATE_BUDGET. "Goal" / "Income Target" = CREATE_INCOME_GOAL.
+                - CRITICAL FOR SCHEDULES (CREATE_SCHEDULE): Evaluate repeat logic. Set `repeatType` to "DAILY", "WEEKLY", "MONTHLY", "YEARLY", or "CUSTOM". Generate `repeatConfig` as JSON object string (e.g. "{\"day_of_month\": 5}" or "{\"day_of_week\": [2, 4]}").
+                - Let "monthly" / "mỗi tháng" -> repeatType "MONTHLY". "hàng ngày" / "mỗi ngày" -> "DAILY".
                 - CRITICAL FOR BUDGET/GOAL: If the user explicitly mentions a month (e.g. 'tháng 6', 'tháng này', 'tháng tới', 'tháng 1'), extract it into entries[0].date in YYYY-MM-01 format. If NO month is mentioned, entries[0].date MUST be null.
-                - CRITICAL FOR CATEGORY: Only set `categoryName` if it is EXPLICITLY mentioned in the user message or detectable from the image. DO NOT guess or infer a category if the user didn't specify one. If no category is mentioned, set `categoryName` to null.
+                - CRITICAL FOR CATEGORY: Only set `categoryName` if it corresponds to one of the provided valid categories or is explicitly mentioned. If no category matches, set `categoryName` to null.
+                - INCOME vs EXPENSE: Most financial transactions are EXPENSE (buying, paying, spending, 'mua', 'đổ', 'thuê', 'trả', 'chi', 'mất', 'tốn'). Only use INCOME if explicitly mentioned ('lương', 'thưởng', 'được cho', 'nhận', '+', 'bonus', 'salary', 'income', 'receive', 'về').
+                - SPLITTING RULE: If the user mentions multiple items or transactions in a single message (using commas, 'và', 'còn', 'với', 'and', etc.), extract EACH one into a separate object in the 'entries' array.
                 - If the intent involves an image of a purchase/payment, always set intent to "INSERT" and set isConfirmation to false.
                 - If the user explicitly confirms a previously proposed transaction or financial plan (e.g., "yes", "save", "ok", "confirm", "lưu", "đồng ý"), set isConfirmation to true.
                 - If the user modifies a previously proposed transaction (e.g., "change amount to 50k"), set isConfirmation to false and update the entries.
                 - If the intent or message implies deleting multiple or all entries for a specific time/category (e.g., "delete all", "everything", "toàn bộ", "tất cả", "hết"), set target.deleteAll to true.
-                - **PENDING TRANSACTIONS RULE**: If the conversation history contains transactions that were proposed but NOT yet confirmed/saved, and the user adds NEW transactions, APPEND the new ones and return the FULL accumulated list in the "entries" array.
-                - If the user says "hủy", "xóa", "làm lại", or "bỏ giao dịch trước", set intent to "DELETE" and "target.deleteAll" to true to indicate a request to discard the pending list.
+                - If the user says "hủy", "xóa", "làm lại", "bỏ qua", or "cancel", set intent to "DELETE" and "target.deleteAll" to true.
+                - **PENDING TRANSACTIONS RULE**: In an "INSERT" flow with unconfirmed drafts, the "entries" array should ideally contain ALL currently proposed transactions. If the user corrects/modifies a previously proposed transaction, UPDATE that specific entry in the array instead of adding a double. If the user adds NEW transactions, append them to the existing ones.
                 - %s
 
                 SCHEMA:
                 {
-                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "CREATE_BUDGET" | "CREATE_INCOME_GOAL" | "VIEW_FINANCIAL_PLAN" | "UNKNOWN",
+                  "intent": "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "ADVICE" | "CREATE_BUDGET" | "CREATE_INCOME_GOAL" | "VIEW_FINANCIAL_PLAN" | "CREATE_SCHEDULE" | "UPDATE_SCHEDULE" | "DELETE_SCHEDULE" | "DISABLE_SCHEDULE" | "ENABLE_SCHEDULE" | "LIST_SCHEDULES" | "LIST_UPCOMING_TRANSACTIONS" | "EXPLAIN_TRANSACTION_SOURCE" | "UNKNOWN",
                   "isConfirmation": boolean,
                   "adviceReply": "string (only for ADVICE)",
                   "query": {
@@ -162,7 +189,9 @@ public class GeminiClientWrapper {
                     "categoryName": "Ăn uống",
                     "date": "YYYY-MM-DD",
                     "noteKeywords": "phở",
-                    "deleteAll": false
+                    "deleteAll": false,
+                    "repeatType": "MONTHLY",
+                    "repeatConfig": "{\"day_of_month\": 5}"
                   },
                   "entries": [
                     {
@@ -170,7 +199,9 @@ public class GeminiClientWrapper {
                       "categoryName": "Ăn uống",
                       "note": "Ăn phở",
                       "type": "EXPENSE",
-                      "date": "YYYY-MM-DD"
+                      "date": "YYYY-MM-DD",
+                      "repeatType": "MONTHLY",
+                      "repeatConfig": "{\"day_of_month\": 5}"
                     }
                   ]
                 }
@@ -178,7 +209,11 @@ public class GeminiClientWrapper {
                 EXAMPLES:
                 - [Image and "Set budget for food 5M"]: intent=CREATE_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống", date: null}], isConfirmation=false
                 - "ngân sách ăn uống 3 triệu tháng 6": intent=CREATE_BUDGET, entries=[{amount: 3000000, categoryName: "Ăn uống", date: "YYYY-06-01"}], isConfirmation=false
+                - "Sáng nay mua trà sữa 30k, đổ xăng 50k và thuê nhà 3 triệu": intent=INSERT, entries=[{amount: 30000, categoryName: "Ăn uống", note: "mua trà sữa 30k", type: "EXPENSE"}, {amount: 50000, categoryName: "Xăng xe", note: "đổ xăng 50k", type: "EXPENSE"}, {amount: 3000000, categoryName: "Nhà cửa", note: "thuê nhà 3 triệu", type: "EXPENSE"}], isConfirmation=false
                 - "mục tiêu lương 20 triệu tháng này": intent=CREATE_INCOME_GOAL, entries=[{amount: 20000000, categoryName: "Lương", date: "YYYY-MM-01"}], isConfirmation=false
+                - "Trả tiền điện ngày 5 hàng tháng": intent=CREATE_SCHEDULE, entries=[{categoryName: "Nhà cửa", repeatType: "MONTHLY", repeatConfig: "{\"day_of_month\": 5}"}], isConfirmation=false
+                - "tắt lịch Netflix": intent=DISABLE_SCHEDULE, isConfirmation=false
+                - "Chi tự động này ở đâu ra?": intent=EXPLAIN_TRANSACTION_SOURCE, isConfirmation=false
                 - [Receipt Image of a 50k Coffee]: intent=INSERT, entries=[{amount: 50000, categoryName: "Ăn uống", note: "Coffee"}], isConfirmation=false
                 - "Yes, save it" (after a 50k Coffee was proposed): intent=INSERT, entries=[{amount: 50000, ...}], isConfirmation=true
                 - "ok lưu ngân sách" (after a budget was proposed): intent=CREATE_BUDGET, entries=[{amount: 3000000, ...}], isConfirmation=true
@@ -218,7 +253,17 @@ public class GeminiClientWrapper {
                 .parts(List.of(textPart, imagePart))
                 .build();
 
-        return getClient().models.generateContent(model, List.of(content), null);
+        try {
+            return getClient().models.generateContent(model, List.of(content), null);
+        } catch (Throwable t) {
+            String msg = t.getMessage() != null ? t.getMessage() : "";
+            if (msg.contains("429")) {
+                // Return a clear 429 message instead of logging ERROR + stack trace here
+                throw new RuntimeException("429: Rate limit exceeded");
+            }
+            log.error("GenAI generateContent failed: {}", msg);
+            throw new RuntimeException("GenAI error: " + msg, t);
+        }
     }
 
     private Client getClient() {
@@ -279,6 +324,7 @@ public class GeminiClientWrapper {
         public GeminiParsedQuery query;
         public GeminiParsedTarget target;
         public List<GeminiParsedEntry> entries;
+        public boolean isRateLimited; // New flag
     }
 
     @Getter
@@ -290,6 +336,8 @@ public class GeminiClientWrapper {
         public String date;
         public String noteKeywords;
         public Boolean deleteAll;
+        public String repeatType;
+        public String repeatConfig;
     }
 
     @Getter
@@ -313,5 +361,7 @@ public class GeminiClientWrapper {
         public String note;
         public String type;
         public String date;
+        public String repeatType;
+        public String repeatConfig;
     }
 }

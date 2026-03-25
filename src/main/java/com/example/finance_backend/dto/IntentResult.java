@@ -25,6 +25,14 @@ public class IntentResult {
         CREATE_BUDGET,
         CREATE_INCOME_GOAL,
         VIEW_FINANCIAL_PLAN,
+        CREATE_SCHEDULE,
+        UPDATE_SCHEDULE,
+        DELETE_SCHEDULE,
+        DISABLE_SCHEDULE,
+        ENABLE_SCHEDULE,
+        LIST_SCHEDULES,
+        LIST_UPCOMING_TRANSACTIONS,
+        EXPLAIN_TRANSACTION_SOURCE,
         UNKNOWN
     }
 
@@ -59,6 +67,9 @@ public class IntentResult {
             case CREATE_BUDGET -> "QUERY";
             case CREATE_INCOME_GOAL -> "QUERY";
             case VIEW_FINANCIAL_PLAN -> "QUERY";
+            case CREATE_SCHEDULE, UPDATE_SCHEDULE, DELETE_SCHEDULE, DISABLE_SCHEDULE, ENABLE_SCHEDULE -> "SCHEDULE";
+            case LIST_SCHEDULES, LIST_UPCOMING_TRANSACTIONS -> "QUERY";
+            case EXPLAIN_TRANSACTION_SOURCE -> "QUERY";
             case UNKNOWN -> "UNKNOWN";
         };
     }

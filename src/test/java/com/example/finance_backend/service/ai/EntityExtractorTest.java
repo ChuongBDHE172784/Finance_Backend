@@ -120,4 +120,30 @@ public class EntityExtractorTest {
         assertEquals(1, slots.size());
         assertTrue(slots.get(0).isMissingCriticalInfo());
     }
+
+    // ── Repeat Parsing Tests ──
+
+    @Test
+    void testInferRepeatType() {
+        assertEquals("MONTHLY", extractor.inferRepeatType("moi thang"));
+        assertEquals("WEEKLY", extractor.inferRepeatType("hang tuan"));
+        assertEquals("DAILY", extractor.inferRepeatType("moi ngay"));
+        assertEquals("YEARLY", extractor.inferRepeatType("hang nam"));
+        assertEquals("CUSTOM", extractor.inferRepeatType("dinh ky"));
+        assertEquals("NONE", extractor.inferRepeatType("an pho"));
+    }
+
+    @Test
+    void testInferRepeatConfig_Monthly() {
+        // "ngay 5 hang thang" -> {"day_of_month": 5}
+        String config = extractor.inferRepeatConfig("tra tien dien ngay 5 hang thang", "MONTHLY");
+        assertEquals("{\"day_of_month\": 5}", config);
+    }
+
+    @Test
+    void testInferRepeatConfig_Weekly() {
+        // "thu 2 va thu 4 hang tuan" -> {"day_of_week": [2, 4]}
+        String config = extractor.inferRepeatConfig("di gym thu 2 va thu 4 hang tuan", "WEEKLY");
+        assertEquals("{\"day_of_week\": [2, 4]}", config);
+    }
 }

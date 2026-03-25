@@ -44,6 +44,8 @@ public class EntityExtractor {
             String date = parsed.getStartDate() != null
                     ? parsed.getStartDate().toString()
                     : LocalDate.now().toString();
+            String repeatType = inferRepeatType(normalized);
+            String repeatConfig = inferRepeatConfig(normalized, repeatType);
 
             slots.add(TransactionSlot.builder()
                     .amount(amount)
@@ -51,10 +53,62 @@ public class EntityExtractor {
                     .note(sub.trim())
                     .type(type)
                     .date(date)
+                    .repeatType(repeatType)
+                    .repeatConfig(repeatConfig)
                     .confidence(amount != null ? 0.85 : 0.4)
                     .build());
         }
         return slots;
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // PHÁT HIỆN LỊCH TRÌNH VÀ LẶP LẠI
+    // ═════════════════════════════════════════════════════════
+
+    /**
+     * Suy luận loại lặp lại từ văn bản (ví dụ: MONTHLY, DAILY).
+     */
+    public String inferRepeatType(String normalizedText) {
+        if (normalizedText == null) return "NONE";
+        if (TextPreprocessor.containsAny(normalizedText, "hang ngay", "moi ngay", "every day", "daily")) return "DAILY";
+        if (TextPreprocessor.containsAny(normalizedText, "hang tuan", "moi tuan", "every week", "weekly")) return "WEEKLY";
+        if (TextPreprocessor.containsAny(normalizedText, "hang thang", "moi thang", "every month", "monthly")) return "MONTHLY";
+        if (TextPreprocessor.containsAny(normalizedText, "hang nam", "moi nam", "every year", "yearly")) return "YEARLY";
+        if (TextPreprocessor.containsAny(normalizedText, "dinh ky")) return "CUSTOM";
+        return "NONE";
+    }
+
+    /**
+     * Suy luận cấu hình lặp lại (JSON format) như ngày trong tháng.
+     */
+    public String inferRepeatConfig(String normalizedText, String repeatType) {
+        if (normalizedText == null) return null;
+        if ("MONTHLY".equals(repeatType)) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("ngay\\s+(\\d{1,2})").matcher(normalizedText);
+            if (m.find()) {
+                try {
+                    int day = Integer.parseInt(m.group(1));
+                    if (day >= 1 && day <= 31) {
+                        return "{\"day_of_month\": " + day + "}";
+                    }
+                } catch (NumberFormatException e) {
+                    // Ignore
+                }
+            }
+        } else if ("WEEKLY".equals(repeatType)) {
+            List<Integer> days = new ArrayList<>();
+            if (normalizedText.matches(".*\\b(thu 2|thu hai)\\b.*")) days.add(2);
+            if (normalizedText.matches(".*\\b(thu 3|thu ba)\\b.*")) days.add(3);
+            if (normalizedText.matches(".*\\b(thu 4|thu tu)\\b.*")) days.add(4);
+            if (normalizedText.matches(".*\\b(thu 5|thu nam)\\b.*")) days.add(5);
+            if (normalizedText.matches(".*\\b(thu 6|thu sau)\\b.*")) days.add(6);
+            if (normalizedText.matches(".*\\b(thu 7|thu bay)\\b.*")) days.add(7);
+            if (normalizedText.matches(".*\\b(chu nhat)\\b.*")) days.add(1);
+            if (!days.isEmpty()) {
+                return "{\"day_of_week\": " + days.toString() + "}";
+            }
+        }
+        return null;
     }
 
     // ═════════════════════════════════════════════════════════

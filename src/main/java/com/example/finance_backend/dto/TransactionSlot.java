@@ -21,6 +21,10 @@ public class TransactionSlot {
     private String type;
     /** ISO date string YYYY-MM-DD */
     private String date;
+    /** NONE, DAILY, WEEKLY, MONTHLY, YEARLY, CUSTOM */
+    private String repeatType;
+    /** JSON string representing the config, e.g. {"day_of_month": 5} */
+    private String repeatConfig;
     /** 0.0 – 1.0 confidence score from extraction */
     @Builder.Default
     private double confidence = 1.0;

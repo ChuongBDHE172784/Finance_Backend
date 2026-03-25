@@ -621,6 +621,45 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
+        // PHẢN HỒI LỊCH TRÌNH / SCHEDULES
+        // ═════════════════════════════════════════════════════════
+
+        public String createScheduleSuccess(String category, BigDecimal amount, String repeatType, LocalDate nextRun, String language) {
+                String formattedDate = nextRun != null ? nextRun.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")) : "";
+                String typeTranslate = "MONTHLY".equalsIgnoreCase(repeatType) ? "mỗi tháng" : ("WEEKLY".equalsIgnoreCase(repeatType) ? "mỗi tuần" : ("DAILY".equalsIgnoreCase(repeatType) ? "mỗi ngày" : "định kỳ"));
+                return isEnglish(language) 
+                        ? String.format("Created schedule for %s: %s %s. Next run: %s.", category, formatVnd(amount, language), repeatType != null ? repeatType.toLowerCase() : "", formattedDate)
+                        : String.format("Đã tạo lịch chi tiêu %s %s %s. Lần chạy tiếp theo: %s.", category, formatVnd(amount, language), typeTranslate, formattedDate);
+        }
+
+        public String updateScheduleSuccess(String language) {
+                return t(language, "Đã cập nhật lịch chi tiêu thành công.", "Successfully updated the schedule.");
+        }
+
+        public String disableScheduleSuccess(String language) {
+                return t(language, "Đã tạm dừng lịch chi tiêu.", "Schedule has been disabled.");
+        }
+
+        public String enableScheduleSuccess(String language) {
+                return t(language, "Đã bật lại lịch chi tiêu.", "Schedule has been enabled.");
+        }
+
+        public String deleteScheduleSuccess(String language) {
+                return t(language, "Đã xóa lịch chi tiêu.", "Schedule has been deleted.");
+        }
+
+        public String scheduleNotFound(String language) {
+                return t(language, "Mình không tìm thấy lịch nào phù hợp.", "I couldn't find a matching schedule.");
+        }
+
+        public String scheduleExplanationReply(String category, String repeatType, String language) {
+                String typeTranslate = "MONTHLY".equalsIgnoreCase(repeatType) ? "mỗi tháng" : ("WEEKLY".equalsIgnoreCase(repeatType) ? "mỗi tuần" : ("DAILY".equalsIgnoreCase(repeatType) ? "mỗi ngày" : "định kỳ"));
+                return isEnglish(language)
+                        ? String.format("This transaction was automatically generated from your %s schedule for %s.", repeatType != null ? repeatType.toLowerCase() : "recurring", category)
+                        : String.format("Khoản chi này được tạo tự động từ lịch %s %s.", category, typeTranslate);
+        }
+
+        // ═════════════════════════════════════════════════════════
         // PHẢN HỒI CHUNG / LỖI
         // ═════════════════════════════════════════════════════════
 
@@ -640,6 +679,12 @@ public class ResponseGenerator {
                 return t(language,
                                 "Mình chưa hiểu rõ ý bạn. Bạn có thể nói rõ hơn một chút không?",
                                 "I'm not sure I understand. Could you please be more specific?");
+        }
+
+        public String aiBusyMessage(String language) {
+                return t(language,
+                                "Hệ thống AI hiện đang bận do có quá nhiều yêu cầu. Bạn hãy thử lại sau vài giây nhé.",
+                                "The AI system is currently busy due to many requests. Please try again in a few seconds.");
         }
 
         public String noCategories(String language) {
