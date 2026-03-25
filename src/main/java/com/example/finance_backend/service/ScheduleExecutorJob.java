@@ -1,5 +1,6 @@
 package com.example.finance_backend.service;
 
+import com.example.finance_backend.entity.Account;
 import com.example.finance_backend.entity.Category;
 import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.entity.RepeatType;
@@ -31,6 +32,9 @@ public class ScheduleExecutorJob {
     @Autowired
     private CategoryRepository categoryRepository;
 
+    @Autowired
+    private com.example.finance_backend.repository.AccountRepository accountRepository;
+
     // Run every 10 seconds (for testing, original was 1 hour)
     @Scheduled(fixedRate = 3600000)
     @Transactional
@@ -44,6 +48,23 @@ public class ScheduleExecutorJob {
             try {
                 // Fetch category to get EntryType
                 Category category = categoryRepository.findById(schedule.getCategoryId()).orElse(null);
+                if (category == null) {
+                    log.warn("Skipping schedule ID: {} because category ID: {} is not found", 
+                        schedule.getId(), schedule.getCategoryId());
+                    schedule.setIsActive(false);
+                    scheduleRepository.save(schedule);
+                    continue;
+                }
+
+                // Fetch and check account status
+                var accountOpt = accountRepository.findById(schedule.getAccountId());
+                if (accountOpt.isEmpty() || accountOpt.get().isDeleted()) {
+                    log.warn("Skipping schedule ID: {} because account ID: {} is deleted or not found", 
+                        schedule.getId(), schedule.getAccountId());
+                    schedule.setIsActive(false);
+                    scheduleRepository.save(schedule);
+                    continue;
+                }
 
                 // Create Transaction
                 FinancialEntry entry = FinancialEntry.builder()
@@ -58,6 +79,15 @@ public class ScheduleExecutorJob {
                         .build();
 
                 financialEntryRepository.save(entry);
+
+                // Update account balance
+                Account account = accountOpt.get();
+                if (category.getType() == com.example.finance_backend.entity.EntryType.INCOME) {
+                    account.setBalance(account.getBalance().add(schedule.getAmount()));
+                } else if (category.getType() == com.example.finance_backend.entity.EntryType.EXPENSE) {
+                    account.setBalance(account.getBalance().subtract(schedule.getAmount()));
+                }
+                accountRepository.save(account);
 
                 // Update Schedule
                 if (schedule.getRepeatType() == RepeatType.NONE) {

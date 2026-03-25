@@ -26,6 +26,7 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final FinancialEntryRepository financialEntryRepository;
+    private final com.example.finance_backend.repository.ScheduleRepository scheduleRepository;
     private final ResponseGenerator responseGenerator;
     
     @Autowired
@@ -144,6 +145,7 @@ public class CategoryService {
                         .build()));
 
         financialEntryRepository.updateCategoryId(id, fallbackCategory.getId());
+        scheduleRepository.updateCategoryId(id, fallbackCategory.getId());
 
         categoryRepository.deleteById(id);
         invalidateCache();

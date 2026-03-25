@@ -18,4 +18,9 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     List<Account> findAllActiveByUserId(Long userId);
 
     boolean existsByUserIdAndNameAndIsDeletedFalse(Long userId, String name);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE Account a SET a.isDeleted = true, a.balance = 0 WHERE a.id = :id")
+    void softDeleteById(@org.springframework.data.repository.query.Param("id") Long id);
 }

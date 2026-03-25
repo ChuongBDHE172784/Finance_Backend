@@ -10,9 +10,11 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final com.example.finance_backend.repository.ScheduleRepository scheduleRepository;
 
     @Transactional(readOnly = true)
     public List<Account> findAll(Long userId, boolean includeDeleted) {
@@ -74,9 +76,12 @@ public class AccountService {
         }
         
         // Thực hiện soft delete: đánh dấu đã xóa và reset số dư
-        account.setDeleted(true);
-        account.setBalance(java.math.BigDecimal.ZERO);
-        accountRepository.save(account);
+        accountRepository.softDeleteById(id);
+        
+        // Tắt các lịch trình liên quan đến ví này
+        scheduleRepository.disableSchedulesByAccountId(id);
+        
+        log.info("Soft-deleted account ID: {} and deactivated its schedules", id);
     }
 
     @Transactional
