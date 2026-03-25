@@ -60,6 +60,9 @@ public class FinancialEntry {
     @Column(name = "user_id")
     private Long userId;
 
+    @Column(name = "created_by_schedule_id")
+    private Long createdByScheduleId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
