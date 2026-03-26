@@ -108,7 +108,8 @@ public class AiAssistantService {
         }
 
         // 6. Intent Detection
-        IntentResult intentResult = detectIntent(parsed, geminiResult);
+        boolean hasImage = request.getBase64Image() != null && !request.getBase64Image().isBlank();
+        IntentResult intentResult = detectIntent(parsed, geminiResult, hasImage);
 
         // 7. State Management & Transitions
         handleStateTransitions(conversationId, intentResult);
@@ -127,14 +128,20 @@ public class AiAssistantService {
         return finalizeResponse(response, conversationId, message, imagePath, request.getUserId());
     }
 
-    private IntentResult detectIntent(ParsedMessage parsed, GeminiParseResult gemini) {
+    private IntentResult detectIntent(ParsedMessage parsed, GeminiParseResult gemini, boolean hasImage) {
         if (gemini != null && gemini.intent != null && !gemini.intent.isBlank() && !"UNKNOWN".equalsIgnoreCase(gemini.intent)) {
             return mapGeminiIntent(gemini.intent);
         }
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {
             return IntentResult.builder().intent(Intent.INSERT_TRANSACTION).confidence(0.8).source(IntentResult.Source.GEMINI).build();
         }
-        return intentDetector.detect(parsed);
+        
+        IntentResult ruleResult = intentDetector.detect(parsed);
+        if (hasImage && ruleResult.getIntent() == Intent.UNKNOWN) {
+            // If image exists but intent is unknown, it's very likely an invoice INSERT attempt
+            return IntentResult.builder().intent(Intent.INSERT_TRANSACTION).confidence(0.7).source(IntentResult.Source.RULE).build();
+        }
+        return ruleResult;
     }
 
     private void handleStateTransitions(String conversationId, IntentResult intentResult) {

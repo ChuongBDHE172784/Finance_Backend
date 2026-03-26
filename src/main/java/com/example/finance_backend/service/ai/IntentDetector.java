@@ -20,6 +20,10 @@ public class IntentDetector {
     private static final List<String> DELETE_KW = List.of(
             "xoa", "huy", "bo qua", "delete", "remove", "erase", "clear", "cancel");
 
+    private static final List<String> INSERT_KW = List.of(
+            "mua", "an", "uong", "thue", "do", "nap", "dong", "tra", "rut", "chuyen",
+            "hoa don", "bien lai", "phieu thu", "bill", "invoice", "receipt", "voucher");
+
     private static final List<String> UPDATE_BASE_KW = List.of(
             "doi", "cap nhat", "update", "change", "edit", "set", "replace");
 
@@ -162,12 +166,21 @@ public class IntentDetector {
                     .build();
         }
 
-        // Ưu tiên cao cho INSERT nếu có các động từ "mua", "an", "uong", "thue" và có số tiền
-        // Điều này giúp tránh nhầm lẫn "sua" (milk) thành "sua" (fix)
-        if (hasAmount && (containsWord(normalized, List.of("mua", "an", "uong", "thue", "do", "nap", "dong", "tra", "rut", "chuyen")))) {
+        // Ưu tiên cao cho INSERT nếu có các lý do rõ ràng hoặc có số tiền với động từ
+        boolean hasInsertKW = containsWord(normalized, INSERT_KW);
+        if (hasAmount && hasInsertKW) {
             return IntentResult.builder()
                     .intent(Intent.INSERT_TRANSACTION)
                     .confidence(0.85)
+                    .source(Source.RULE)
+                    .build();
+        }
+
+        // Trường hợp gửi ảnh hóa đơn nhưng không có số tiền trong text
+        if (hasInsertKW && (normalized.contains("hoa don") || normalized.contains("bill") || normalized.contains("invoice") || normalized.contains("receipt"))) {
+            return IntentResult.builder()
+                    .intent(Intent.INSERT_TRANSACTION)
+                    .confidence(0.7) // Thấp hơn chút vì thiếu số tiền, để Gemini xử lý chính
                     .source(Source.RULE)
                     .build();
         }

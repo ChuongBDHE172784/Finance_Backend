@@ -207,6 +207,8 @@ public class GeminiClientWrapper {
                 }
 
                 EXAMPLES:
+                - [Image: Vietnamese receipt with 45.000đ Phở]: intent=INSERT, entries=[{amount: 45000, categoryName: "Ăn uống", note: "Phở", type: "EXPENSE"}], isConfirmation=false
+                - [Image: Bill for electronics 5M]: intent=INSERT, entries=[{amount: 5000000, categoryName: "Mua sắm", note: "Electronics", type: "EXPENSE"}], isConfirmation=false
                 - [Image and "Set budget for food 5M"]: intent=CREATE_BUDGET, entries=[{amount: 5000000, categoryName: "Ăn uống", date: null}], isConfirmation=false
                 - "ngân sách ăn uống 3 triệu tháng 6": intent=CREATE_BUDGET, entries=[{amount: 3000000, categoryName: "Ăn uống", date: "YYYY-06-01"}], isConfirmation=false
                 - "Sáng nay mua trà sữa 30k, đổ xăng 50k và thuê nhà 3 triệu": intent=INSERT, entries=[{amount: 30000, categoryName: "Ăn uống", note: "mua trà sữa 30k", type: "EXPENSE"}, {amount: 50000, categoryName: "Xăng xe", note: "đổ xăng 50k", type: "EXPENSE"}, {amount: 3000000, categoryName: "Nhà cửa", note: "thuê nhà 3 triệu", type: "EXPENSE"}], isConfirmation=false
@@ -214,7 +216,6 @@ public class GeminiClientWrapper {
                 - "Trả tiền điện ngày 5 hàng tháng": intent=CREATE_SCHEDULE, entries=[{categoryName: "Nhà cửa", repeatType: "MONTHLY", repeatConfig: "{\"day_of_month\": 5}"}], isConfirmation=false
                 - "tắt lịch Netflix": intent=DISABLE_SCHEDULE, isConfirmation=false
                 - "Chi tự động này ở đâu ra?": intent=EXPLAIN_TRANSACTION_SOURCE, isConfirmation=false
-                - [Receipt Image of a 50k Coffee]: intent=INSERT, entries=[{amount: 50000, categoryName: "Ăn uống", note: "Coffee"}], isConfirmation=false
                 - "Yes, save it" (after a 50k Coffee was proposed): intent=INSERT, entries=[{amount: 50000, ...}], isConfirmation=true
                 - "ok lưu ngân sách" (after a budget was proposed): intent=CREATE_BUDGET, entries=[{amount: 3000000, ...}], isConfirmation=true
                 - "xem kế hoạch tài chính": intent=VIEW_FINANCIAL_PLAN, isConfirmation=false
