@@ -24,6 +24,10 @@ import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 
+/**
+ * Handler xử lý việc thiết lập hạn mức chi tiêu (Budget) và mục tiêu thu nhập (Income Goal).
+ * Quản lý trạng thái chờ (Slot-filling) nếu người dùng cung cấp thiếu thông tin.
+ */
 @Component
 public class BudgetHandler extends BaseIntentHandler {
 

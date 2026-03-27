@@ -8,6 +8,10 @@ import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.UUID;
 
+/**
+ * Dịch vụ hỗ trợ lưu trữ tệp tin cục bộ.
+ * Nhiệm vụ chính: Lưu các ảnh mã hóa Base64 từ mobile gửi lên và quản lý tệp tin.
+ */
 @Service
 @Slf4j
 public class FileStorageService {

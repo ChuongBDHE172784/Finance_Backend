@@ -11,6 +11,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Dịch vụ quản lý trạng thái của cuộc hội thoại AI.
+ * Lưu trữ các hành động đang chờ xử lý (VD: đang chờ chọn hạng mục cho ngân sách)
+ * và trích xuất thông tin từ các tin nhắn cũ trong lịch sử.
+ */
 @Service
 @RequiredArgsConstructor
 public class ConversationStateService {

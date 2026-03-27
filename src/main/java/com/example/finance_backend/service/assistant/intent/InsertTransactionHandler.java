@@ -23,6 +23,10 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Handler xử lý việc thêm giao dịch mới (Thu nhập/Chi tiêu).
+ * Hỗ trợ bóc tách đa giao dịch, xác nhận bản nháp và lưu vào Database.
+ */
 @Component
 @Slf4j
 public class InsertTransactionHandler extends BaseIntentHandler {

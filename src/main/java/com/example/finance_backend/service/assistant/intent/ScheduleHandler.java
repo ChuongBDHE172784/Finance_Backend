@@ -23,6 +23,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
+/**
+ * Handler xử lý các yêu cầu liên quan đến lập lịch chi tiêu định kỳ (Schedules).
+ * Hỗ trợ tạo mới, cập nhật, bật/tắt, xóa và liệt kê các lịch trình sắp tới.
+ */
 @Component
 public class ScheduleHandler extends BaseIntentHandler {
 

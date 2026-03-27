@@ -22,6 +22,10 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Handler xử lý việc xóa các giao dịch.
+ * Hỗ trợ xóa một hoặc nhiều giao dịch dựa trên tiêu chí tìm kiếm hoặc lệnh 'xóa hết'.
+ */
 @Component
 public class DeleteTransactionHandler extends BaseIntentHandler {
 

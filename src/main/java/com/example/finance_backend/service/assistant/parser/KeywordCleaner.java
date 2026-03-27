@@ -2,9 +2,14 @@ package com.example.finance_backend.service.assistant.parser;
 
 import org.springframework.stereotype.Component;
 
+/**
+ * Hỗ trợ làm sạch các từ khóa (Keywords) bằng cách loại bỏ các từ dư thừa
+ * và nhận diện các lệnh nhanh như 'đồng ý', 'hủy', 'lưu'.
+ */
 @Component
 public class KeywordCleaner {
 
+    /** Loại bỏ các từ dừng (stop-words) và các ký tự đặc biệt để lấy từ khóa chính. */
     public String cleanKeywords(String keywords) {
         if (keywords == null) return "";
         return keywords

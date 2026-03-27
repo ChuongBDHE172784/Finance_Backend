@@ -6,11 +6,16 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Hỗ trợ bóc tách các dòng bản nháp (Draft Lines) từ nội dung phản hồi của AI.
+ * Giúp chuyển đổi các dòng text hiển thị (VD: "- 50.000 đ • Ăn uống") ngược lại thành đối tượng dữ liệu.
+ */
 @Component
 @RequiredArgsConstructor
 public class DraftLineParser {
     private final MoneyParser moneyParser;
 
+    /** Duyệt qua toàn bộ văn bản và bóc tách danh sách các bản nháp. */
     public List<GeminiParsedEntry> parseDraftLines(String content) {
         List<GeminiParsedEntry> result = new ArrayList<>();
         String[] lines = content.split("\n");

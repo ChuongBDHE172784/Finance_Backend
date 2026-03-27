@@ -23,6 +23,10 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Handler xử lý việc cập nhật/sửa đổi các giao dịch đã tồn tại.
+ * Hỗ trợ tìm kiếm giao dịch cần sửa dựa trên từ khóa, ngày tháng hoặc số tiền.
+ */
 @Component
 public class UpdateTransactionHandler extends BaseIntentHandler {
 

@@ -24,6 +24,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Handler xử lý các yêu cầu truy vấn thông tin tài chính.
+ * Hỗ trợ tính tổng, xem xu hướng, tỷ lệ chi tiêu, tóm tắt tháng, 
+ * phân tích sức khỏe tài chính và đưa ra gợi ý thông minh.
+ */
 @Component
 public class QueryTransactionHandler extends BaseIntentHandler {
 

@@ -18,6 +18,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RequiredArgsConstructor
+/**
+ * Lớp trừu tượng cơ sở (Base Class) cung cấp các phương thức tiện ích 
+ * cho việc xử lý Intent trong AI Assistant.
+ */
 public abstract class BaseIntentHandler implements IntentHandler {
 
     protected final CategoryService categoryService;
@@ -36,12 +40,14 @@ public abstract class BaseIntentHandler implements IntentHandler {
             GeminiParseResult geminiResult,
             List<AiMessage> history);
 
+    /** Tạo bản đồ ánh xạ từ tên hạng mục (đã chuẩn hóa) sang ID. */
     protected Map<String, Long> getNameToIdMap() {
         return categoryService.findAll().stream()
                 .collect(Collectors.toMap(c -> textPreprocessor.normalizeVietnamese(c.getName()), c -> c.getId(),
                         (a, b) -> a));
     }
 
+    /** Chuyển tên hạng mục do AI bóc tách thành ID tương ứng trong Database. */
     protected Long resolveCategoryId(Map<String, Long> nameToId, String name, Long fallbackId) {
         if (name == null || name.isBlank())
             return fallbackId;
@@ -49,10 +55,12 @@ public abstract class BaseIntentHandler implements IntentHandler {
         return nameToId.getOrDefault(norm, fallbackId);
     }
 
+    /** Lấy ID của hạng mục 'Khác' nếu không tìm thấy hạng mục khớp. */
     protected Long resolveFallbackCategoryId(Map<String, Long> nameToId) {
         return nameToId.getOrDefault("khac", null);
     }
 
+    /** Tạo chuỗi văn bản danh sách các hạng mục hiện có cho AI gợi ý. */
     protected String getCategoryListResponse(EntryType type, String language) {
         String cats = categoryService.findAll().stream()
                 .filter(c -> c.getType() == type)
@@ -61,11 +69,12 @@ public abstract class BaseIntentHandler implements IntentHandler {
         return "\n" + responseGenerator.t(language, "Danh mục gợi ý: ", "Suggested categories: ") + cats;
     }
 
+    /** Xác định tài khoản/ví nào mà người dùng muốn thực hiện giao dịch. */
     protected AccountResolution resolveAccount(String message, Long defaultAccountId, Long userId, String language) {
-        // Logic resolution account... (omitted for brevity, keep as is if possible or
-        // implement simply)
+        // Nếu đã có ID tài khoản mặc định, ưu tiên sử dụng
         if (defaultAccountId != null)
             return new AccountResolution(defaultAccountId, false, null);
+        // Ngược lại cần người dùng chọn tài khoản
         return new AccountResolution(null, true, null);
     }
 

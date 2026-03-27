@@ -18,6 +18,10 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.*;
 
+/**
+ * Handler xử lý các yêu cầu tư vấn tài chính, tính điểm sức khỏe tài chính 
+ * và các cuộc hội thoại thông thường (General Chat).
+ */
 @Component
 public class AdviceHandler extends BaseIntentHandler {
 
