@@ -39,4 +39,27 @@ public class AiAssistantController {
         aiAssistantService.clearHistory(userId);
         return ResponseEntity.noContent().build();
     }
+
+    @PostMapping("/config/key")
+    public ResponseEntity<Void> saveApiKey(
+            @RequestHeader(value = "X-User-Id") Long userId,
+            @RequestBody java.util.Map<String, String> body) {
+        String key = body.get("apiKey");
+        aiAssistantService.saveCustomApiKey(userId, key);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/config/key")
+    public ResponseEntity<Void> deleteApiKey(
+            @RequestHeader(value = "X-User-Id") Long userId) {
+        aiAssistantService.deleteCustomApiKey(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/config/key/status")
+    public ResponseEntity<java.util.Map<String, Boolean>> getApiKeyStatus(
+            @RequestHeader(value = "X-User-Id") Long userId) {
+        boolean hasKey = aiAssistantService.hasCustomApiKey(userId);
+        return ResponseEntity.ok(java.util.Map.of("hasCustomKey", hasKey));
+    }
 }

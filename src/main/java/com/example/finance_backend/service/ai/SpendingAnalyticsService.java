@@ -233,6 +233,18 @@ public class SpendingAnalyticsService {
         }
     }
 
+    public BudgetStatusResult getBudgetStatus(Long userId, String categoryName, LocalDate date) {
+        LocalDate start = date.withDayOfMonth(1);
+        LocalDate end = date.withDayOfMonth(date.lengthOfMonth());
+        
+        Map<String, Long> nameToId = categoryService.findAll().stream()
+                .collect(Collectors.toMap(c -> c.getName().toLowerCase(), com.example.finance_backend.dto.CategoryDto::getId, (a, b) -> a));
+        Long categoryId = nameToId.get(categoryName.toLowerCase());
+        if (categoryId == null) return null;
+        
+        return getBudgetStatus(userId, categoryId, start, end);
+    }
+
     /**
      * Lấy tất cả các trạng thái ngân sách đang hoạt động của người dùng.
      */

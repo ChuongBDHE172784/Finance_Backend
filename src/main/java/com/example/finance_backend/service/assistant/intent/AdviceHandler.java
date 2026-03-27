@@ -38,7 +38,7 @@ public class AdviceHandler extends BaseIntentHandler {
 
     @Override
     public List<Intent> getSupportedIntents() {
-        return List.of(Intent.FINANCIAL_ADVICE, Intent.GENERAL_CHAT, Intent.UNKNOWN);
+        return List.of(Intent.FINANCIAL_ADVICE, Intent.FINANCIAL_SCORE, Intent.GENERAL_CHAT, Intent.UNKNOWN);
     }
 
     @Override
@@ -47,7 +47,7 @@ public class AdviceHandler extends BaseIntentHandler {
         Long userId = request.getUserId();
         Intent intent = intentResult.getIntent();
 
-        if (Intent.FINANCIAL_ADVICE.equals(intent)) {
+        if (Intent.FINANCIAL_ADVICE.equals(intent) || Intent.FINANCIAL_SCORE.equals(intent)) {
             return handleFinancialAdvice(userId, language);
         }
         

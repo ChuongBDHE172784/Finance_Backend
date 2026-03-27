@@ -8,11 +8,16 @@ import com.example.finance_backend.service.ScheduleService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
+import java.time.DayOfWeek;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
+@Transactional
 public class ScheduleServiceImpl implements ScheduleService {
 
     @Autowired
@@ -41,6 +46,7 @@ public class ScheduleServiceImpl implements ScheduleService {
         existing.setStartDate(dto.getStartDate());
         existing.setCategoryId(dto.getCategoryId());
         existing.setAccountId(dto.getAccountId());
+        existing.setIsActive(dto.getIsActive());
         
         // Recalculate next run if modifying repeat logic
         if (dto.getNextRun() != null) {
@@ -86,8 +92,53 @@ public class ScheduleServiceImpl implements ScheduleService {
             case DAILY:
                 return fromDate.plusDays(1);
             case WEEKLY:
+                if (config != null && !config.trim().isEmpty()) {
+                    try {
+                        DayOfWeek dow = null;
+                        if (config.trim().matches("\\d+")) {
+                            int dayOfWeekIdx = Integer.parseInt(config.trim());
+                            if (dayOfWeekIdx >= 1 && dayOfWeekIdx <= 7) {
+                                dow = DayOfWeek.of(dayOfWeekIdx);
+                            }
+                        } else {
+                            try {
+                                dow = DayOfWeek.valueOf(config.trim().toUpperCase());
+                            } catch (IllegalArgumentException e) {
+                                // Ignore
+                            }
+                        }
+
+                        if (dow != null) {
+                            LocalDateTime next = fromDate.with(TemporalAdjusters.nextOrSame(dow));
+                            if (next.isBefore(fromDate) || next.isEqual(fromDate)) {
+                                next = next.plusWeeks(1);
+                            }
+                            return next;
+                        }
+                    } catch (Exception e) {
+                        // fallback
+                    }
+                }
                 return fromDate.plusWeeks(1);
             case MONTHLY:
+                if (config != null && config.trim().matches("\\d+")) {
+                    try {
+                        int dayOfMonth = Integer.parseInt(config.trim());
+                        int maxDaysInCurrentMonth = fromDate.toLocalDate().lengthOfMonth();
+                        // Find the target day in current month (or last day if dayOfMonth is larger)
+                        LocalDateTime next = fromDate.withDayOfMonth(Math.min(dayOfMonth, maxDaysInCurrentMonth));
+                        
+                        if (next.isBefore(fromDate) || next.isEqual(fromDate)) {
+                            // Move to next month
+                            next = fromDate.plusMonths(1);
+                            int maxDaysInNextMonth = next.toLocalDate().lengthOfMonth();
+                            next = next.withDayOfMonth(Math.min(dayOfMonth, maxDaysInNextMonth));
+                        }
+                        return next;
+                    } catch (Exception e) {
+                        return fromDate.plusMonths(1);
+                    }
+                }
                 return fromDate.plusMonths(1);
             case YEARLY:
                 return fromDate.plusYears(1);

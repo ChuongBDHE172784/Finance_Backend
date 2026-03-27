@@ -34,6 +34,9 @@ public class User {
     @Builder.Default
     private boolean enabled = false;
 
+    @Column(name = "gemini_api_key", length = 500)
+    private String geminiApiKey;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

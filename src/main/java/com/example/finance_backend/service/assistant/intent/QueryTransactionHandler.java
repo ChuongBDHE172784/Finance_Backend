@@ -8,6 +8,7 @@ import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.service.CategoryService;
 import com.example.finance_backend.service.ai.EntityExtractor;
+import com.example.finance_backend.service.ai.GeminiClientWrapper;
 import com.example.finance_backend.service.ai.GeminiClientWrapper.GeminiParseResult;
 import com.example.finance_backend.service.ai.ResponseGenerator;
 import com.example.finance_backend.service.ai.SpendingAnalyticsService;
@@ -59,6 +60,9 @@ public class QueryTransactionHandler extends BaseIntentHandler {
         if (Intent.MONTHLY_SUMMARY.equals(intentResult.getIntent())) {
              return handleMonthlySummary(userId, language);
         }
+        if (Intent.BUDGET_QUERY.equals(intentResult.getIntent())) {
+             return handleBudgetStatus(request, gemini != null ? gemini.getQuery() : null);
+        }
 
         LocalDate today = LocalDate.now();
         LocalDate start, end;
@@ -67,7 +71,7 @@ public class QueryTransactionHandler extends BaseIntentHandler {
         Integer limit = null;
 
         if (gemini != null && gemini.query != null) {
-            start = dateParser.parseDate(gemini.query.startDate, today.withDayOfMonth(1));
+            start = dateParser.parseDate(gemini.query.endDate, today.withDayOfMonth(1));
             end = dateParser.parseDate(gemini.query.endDate, today);
             typeFilter = gemini.query.type != null ? gemini.query.type.toUpperCase(Locale.ROOT) : "EXPENSE";
             metric = gemini.query.metric != null ? gemini.query.metric.toUpperCase(Locale.ROOT) : "TOTAL";
@@ -89,7 +93,7 @@ public class QueryTransactionHandler extends BaseIntentHandler {
         // Dispatch based on metric
         switch (metric) {
             case "TOP_CATEGORY": return buildTopCategoryReply(start, end, typeFilter, language);
-            case "LIST": return buildListReply(start, end, typeFilter, limit, categoryNameFilter, language);
+            case "LIST": return buildListReply(start, end, typeFilter, limit, categoryNameFilter, gemini, language);
             case "AVERAGE": return buildAverageReply(start, end, typeFilter, language);
             case "TREND": return buildTrendReply(start, end, typeFilter, language);
             case "PERCENTAGE": return buildPercentageReply(start, end, typeFilter, language);
@@ -144,15 +148,24 @@ public class QueryTransactionHandler extends BaseIntentHandler {
         return AiAssistantResponse.builder().intent("QUERY").reply(responseGenerator.percentageReply(start, end, breakdown, result.getTotal(), language)).build();
     }
 
-    private AiAssistantResponse buildListReply(LocalDate start, LocalDate end, String typeFilter, Integer limit, String categoryNameFilter, String language) {
-        int max = (limit == null || limit <= 0) ? 10 : Math.min(limit, 20);
-        List<FinancialEntry> entries = analyticsService.getRecentTransactions(start, end, typeFilter, max);
+    private AiAssistantResponse buildListReply(LocalDate start, LocalDate end, String typeFilter, Integer limit, String categoryNameFilter, GeminiParseResult gemini, String language) {
+        int maxResults = (limit == null || limit <= 0) ? 10 : Math.min(limit, 20);
+        List<FinancialEntry> entries = analyticsService.getRecentTransactions(start, end, typeFilter, maxResults);
         if (categoryNameFilter != null && !categoryNameFilter.isBlank()) {
             String normCat = entityExtractor.normalizeCategoryName(categoryNameFilter);
             Map<String, Long> nameToId = getNameToIdMap();
             Long catId = resolveCategoryId(nameToId, normCat, null);
             if (catId != null) entries = entries.stream().filter(e -> Objects.equals(e.getCategoryId(), catId)).collect(Collectors.toList());
         }
+        
+        // Amount filtering
+        if (gemini != null && gemini.getQuery() != null) {
+            BigDecimal minVal = gemini.getQuery().getMinAmount();
+            BigDecimal maxVal = gemini.getQuery().getMaxAmount();
+            if (minVal != null) entries = entries.stream().filter(e -> e.getAmount().compareTo(minVal) >= 0).collect(Collectors.toList());
+            if (maxVal != null) entries = entries.stream().filter(e -> e.getAmount().compareTo(maxVal) <= 0).collect(Collectors.toList());
+        }
+
         if (entries.isEmpty()) return AiAssistantResponse.builder().intent("QUERY").reply(responseGenerator.noTransactions(language)).build();
         Map<Long, String> idToName = categoryService.getIdToNameMap();
         StringBuilder sb = new StringBuilder();
@@ -165,6 +178,18 @@ public class QueryTransactionHandler extends BaseIntentHandler {
             sb.append("\n");
         }
         return AiAssistantResponse.builder().intent("QUERY").reply(sb.toString().trim()).build();
+    }
+
+    private AiAssistantResponse handleBudgetStatus(AiAssistantRequest request, GeminiClientWrapper.GeminiParsedQuery q) {
+        String language = request.getLanguage();
+        if (q == null || q.getCategoryName() == null) return AiAssistantResponse.builder().intent("QUERY").reply(responseGenerator.t(language, "Bạn muốn kiểm tra ngân sách của danh mục nào?", "Which category budget do you want to check?")).build();
+        
+        String catName = q.getCategoryName();
+        var status = analyticsService.getBudgetStatus(request.getUserId(), catName, LocalDate.now());
+        if (status == null) return AiAssistantResponse.builder().intent("QUERY").reply(responseGenerator.noBudgetData(language)).build();
+        
+        String reply = responseGenerator.budgetStatusReply(status, language);
+        return AiAssistantResponse.builder().intent("QUERY").reply(reply).build();
     }
 
     private AiAssistantResponse handleMonthlySummary(Long userId, String language) {

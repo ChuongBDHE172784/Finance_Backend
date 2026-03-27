@@ -63,8 +63,12 @@ public class BudgetHandler extends BaseIntentHandler {
         EntryType type = intentResult.getIntent() == Intent.CREATE_INCOME_GOAL ? EntryType.INCOME : EntryType.EXPENSE;
         String intentStr = type == EntryType.INCOME ? "CREATE_INCOME_GOAL" : "CREATE_BUDGET";
 
-        PendingPlanAction pending = stateService.computePlanningStateIfAbsent(conversationId, k -> new PendingPlanAction());
-        pending.intent = intentStr; //Nếu user chưa nói đủ dữ liệu, hệ thống phải nhớ lại.
+        PendingPlanAction pending = stateService.computePlanningStateIfAbsent(conversationId, k -> {
+            PendingPlanAction p = new PendingPlanAction();
+            p.initialMessage = parsed.getOriginalText(); // First message!
+            return p;
+        });
+        pending.intent = intentStr; 
 
         // Trích xuất dữ liệu từ Gemini (theo prompt, data budget/goal ở entries[0])
         if (gemini != null && gemini.entries != null && !gemini.entries.isEmpty()) {

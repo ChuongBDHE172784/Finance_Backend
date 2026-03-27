@@ -30,4 +30,12 @@ public class KeywordCleaner {
                 || s.equals("xac nhan") || s.equals("co") || s.equals("vang")
                 || s.equals("u tru") || s.equals("chuan") || s.equals("uy") || s.equals("chot");
     }
+
+    public boolean isCancelRequest(String normalized) {
+        if (normalized == null || normalized.isBlank()) return false;
+        String s = normalized.trim().toLowerCase();
+        return s.startsWith("huy") || s.startsWith("bo qua") || s.equals("khong") 
+            || s.equals("khong phai") || s.equals("ngung") || s.equals("cancel") 
+            || s.equals("stop") || s.equals("no") || s.equals("nevermind");
+    }
 }

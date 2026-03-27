@@ -22,6 +22,7 @@ public class ConversationStateService {
         public String category;
         public BigDecimal amount;
         public String month;
+        public String initialMessage;
         public String awaitingField;
     }
 
@@ -33,6 +34,7 @@ public class ConversationStateService {
         public String repeatType;
         public String repeatConfig;
         public String note;
+        public String initialMessage;
         public String awaitingField; // CATEGORY, AMOUNT, ACCOUNT, REPEAT
     }
 

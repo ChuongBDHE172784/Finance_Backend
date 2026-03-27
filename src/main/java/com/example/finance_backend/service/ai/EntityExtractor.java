@@ -84,29 +84,26 @@ public class EntityExtractor {
     public String inferRepeatConfig(String normalizedText, String repeatType) {
         if (normalizedText == null) return null;
         if ("MONTHLY".equals(repeatType)) {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("ngay\\s+(\\d{1,2})").matcher(normalizedText);
+            // Match "ngay 15" or just "15"
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(ngay|ngay\\s+thu)?\\s*(\\d{1,2})").matcher(normalizedText);
             if (m.find()) {
                 try {
-                    int day = Integer.parseInt(m.group(1));
+                    int day = Integer.parseInt(m.group(2));
                     if (day >= 1 && day <= 31) {
-                        return "{\"day_of_month\": " + day + "}";
+                        return String.valueOf(day);
                     }
                 } catch (NumberFormatException e) {
                     // Ignore
                 }
             }
         } else if ("WEEKLY".equals(repeatType)) {
-            List<Integer> days = new ArrayList<>();
-            if (normalizedText.matches(".*\\b(thu 2|thu hai)\\b.*")) days.add(2);
-            if (normalizedText.matches(".*\\b(thu 3|thu ba)\\b.*")) days.add(3);
-            if (normalizedText.matches(".*\\b(thu 4|thu tu)\\b.*")) days.add(4);
-            if (normalizedText.matches(".*\\b(thu 5|thu nam)\\b.*")) days.add(5);
-            if (normalizedText.matches(".*\\b(thu 6|thu sau)\\b.*")) days.add(6);
-            if (normalizedText.matches(".*\\b(thu 7|thu bay)\\b.*")) days.add(7);
-            if (normalizedText.matches(".*\\b(chu nhat)\\b.*")) days.add(1);
-            if (!days.isEmpty()) {
-                return "{\"day_of_week\": " + days.toString() + "}";
-            }
+            if (normalizedText.matches(".*\\b(thu\\s+2|thu\\s+hai|t2|monday|mon)\\b.*")) return "1";
+            if (normalizedText.matches(".*\\b(thu\\s+3|thu\\s+ba|t3|tuesday|tue)\\b.*")) return "2";
+            if (normalizedText.matches(".*\\b(thu\\s+4|thu\\s+tu|t4|wednesday|wed)\\b.*")) return "3";
+            if (normalizedText.matches(".*\\b(thu\\s+5|thu\\s+nam|t5|thursday|thu)\\b.*")) return "4";
+            if (normalizedText.matches(".*\\b(thu\\s+6|thu\\s+sau|t6|friday|fri)\\b.*")) return "5";
+            if (normalizedText.matches(".*\\b(thu\\s+7|thu\\s+bay|t7|saturday|sat)\\b.*")) return "6";
+            if (normalizedText.matches(".*\\b(chu\\s+nhat|cn|sunday|sun)\\b.*")) return "7";
         }
         return null;
     }
