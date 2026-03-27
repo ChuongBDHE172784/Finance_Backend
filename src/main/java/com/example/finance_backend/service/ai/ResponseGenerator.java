@@ -17,10 +17,9 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Tạo các phản hồi bằng ngôn ngữ tự nhiên bằng tiếng Việt và tiếng Anh.
- * Xử lý định dạng tiền tệ, mẫu câu hỏi làm rõ, tin nhắn xác nhận,
- * định dạng tóm tắt tài chính, trạng thái ngân sách, báo cáo điểm, và các
- * gợi ý thông minh.
+ * Thành phần chịu trách nhiệm tạo ra các câu trả lời bằng ngôn ngữ tự nhiên.
+ * Hỗ trợ đa ngôn ngữ (Tiếng Việt, Tiếng Anh, Tiếng Nhật, Tiếng Hàn, Tiếng Trung).
+ * Nhiệm vụ chính: Định dạng tiền tệ, tạo thông báo thành công/thất bại, tóm tắt báo cáo.
  */
 @Component
 public class ResponseGenerator {
@@ -91,6 +90,8 @@ public class ResponseGenerator {
         // PHẢN HỒI KHI THÊM GIAO DỊCH
         // ═════════════════════════════════════════════════════════
 
+        /** Tạo thông báo khi lưu giao dịch thành công. */
+
         public String insertSuccess(int count, java.util.List<String> details, String language) {
                 StringBuilder reply = new StringBuilder();
                 reply.append(t(language, "Đã lưu ", "Saved "))
@@ -115,7 +116,7 @@ public class ResponseGenerator {
                                                 "Mình chưa thể tạo giao dịch. Hãy thử nhập rõ số tiền và nội dung nhé.",
                                                 "I couldn't create the transaction. Please include a clear amount and description.");
         }
-
+        /** Hiển thị bản nháp giao dịch đã bóc tách được để người dùng xác nhận trước khi lưu. */
         public String draftMessage(java.util.List<GeminiClientWrapper.GeminiParsedEntry> entries, String language) {
                 if (entries == null || entries.isEmpty())
                         return insertEmpty(language);
@@ -143,8 +144,10 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // PHẢN HỒI KHI TRUY VẤN
+        // PHẢN HỒI KHI TRUY VẤN (ANALYTICS)
         // ═════════════════════════════════════════════════════════
+
+        /** Các phản hồi liên quan đến tổng tiền, trung bình, tỷ lệ và xu hướng chi tiêu. */
 
         public String totalReply(LocalDate start, LocalDate end, BigDecimal total, String typeLabel, String language) {
                 return isEnglish(language)
@@ -276,8 +279,10 @@ public class ResponseGenerator {
         }
 
         // ═════════════════════════════════════════════════════════
-        // PHẢN HỒI TRẠNG THÁI NGÂN SÁCH
+        // PHẢN HỒI TRẠNG THÁI NGÂN SÁCH (BUDGET)
         // ═════════════════════════════════════════════════════════
+
+        /** Thông báo về mức độ sử dụng ngân sách hoặc tiến độ đạt mục tiêu thu nhập. */
 
         public String budgetStatusReply(BudgetStatusResult status, String language) {
                 if ("INCOME_TARGET".equals(status.getPlanType())) {

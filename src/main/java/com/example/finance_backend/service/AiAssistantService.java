@@ -18,6 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
+/**
+ * Service trung tâm điều phối toàn bộ luồng xử lý của Trợ lý ảo AI.
+ * Nhiệm vụ: Tiền xử lý, gọi Gemini NLU, quản lý trạng thái và định tuyến tới các Handler chuyên biệt.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -30,14 +34,17 @@ public class AiAssistantService {
     private final com.example.finance_backend.repository.UserRepository userRepository;
     private final KeywordCleaner keywordCleaner;
     
-    // Infrastructure
+    // Quản lý hạ tầng (Lưu trữ ảnh, Trạng thái hội thoại)
     private final FileStorageService fileStorageService;
     private final ConversationStateService stateService;
     
-    // Handlers
+    // Danh sách các xử lý viên cho từng ý định (Intent)
     private final List<IntentHandler> handlers;
     private final Map<Intent, IntentHandler> handlerMap = new EnumMap<>(Intent.class);
 
+    /**
+     * Khởi tạo bản đồ ánh xạ từ Intent sang Handler tương ứng.
+     */
     @PostConstruct
     public void init() {
         for (IntentHandler handler : handlers) {
@@ -47,6 +54,9 @@ public class AiAssistantService {
         }
     }
 
+    /**
+     * Phương thức bao bọc xử lý chính, đảm bảo không bị crash và trả về lỗi thân thiện.
+     */
     public AiAssistantResponse handle(AiAssistantRequest request) {
         try {
             return doHandle(request);
@@ -60,17 +70,22 @@ public class AiAssistantService {
         }
     }
 
+    /**
+     * Luồng xử lý chính (Pipeline): Preprocess -> Gemini -> Intent Detection -> Routing -> Finalize.
+     */
     private AiAssistantResponse doHandle(AiAssistantRequest request) {
         final String message = request.getMessage() == null ? "" : request.getMessage().trim();
         String conversationId = request.getConversationId();
+        // Tạo ID hội thoại mới nếu chưa có
         if (conversationId == null || conversationId.isBlank()) {
             conversationId = UUID.randomUUID().toString();
         }
 
         String language = request.getLanguage() != null ? request.getLanguage() : "vi";
+        // Bước 1: Tiền xử lý văn bản
         ParsedMessage parsed = textPreprocessor.preprocess(message, language);
 
-        // 1. Handle empty input
+        // Bước 1b: Xử lý đầu vào trống
         if (message.isEmpty() && (request.getBase64Image() == null || request.getBase64Image().isBlank())) {
             AiAssistantResponse resp = AiAssistantResponse.builder()
                     .intent("UNKNOWN")
@@ -80,13 +95,13 @@ public class AiAssistantService {
             return resp;
         }
 
-        // 2. Load History (Limit to last 6 messages to save tokens and avoid TPM limit)
+        // Bước 2: Nạp lịch sử (Giới hạn 6 tin nhắn để tiết kiệm token và tránh limit API)
         List<AiMessage> history = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
         if (history.size() > 6) {
             history = history.subList(history.size() - 6, history.size());
         }
 
-        // 2.5 Handle Cancellation
+        // Bước 2.5: Xử lý yêu cầu Hủy bỏ
         if (keywordCleaner.isCancelRequest(parsed.getNormalizedText())) {
             stateService.clearAllStates(conversationId);
             AiAssistantResponse resp = AiAssistantResponse.builder()
@@ -97,10 +112,10 @@ public class AiAssistantService {
             return finalizeResponse(resp, conversationId, message, null, request.getUserId());
         }
 
-        // 3. Process image if exists
+        // Bước 3: Lưu trữ ảnh nếu có
         String imagePath = fileStorageService.saveBase64Image(request.getBase64Image());
 
-        // 4. Gemini NLU (Agentic with Function Calling)
+        // Bước 4: Gọi Gemini NLU (Agentic với Function Calling để bóc tách thông tin)
         String customApiKey = userRepository.findById(request.getUserId()).map(u -> u.getGeminiApiKey()).orElse(null);
         GeminiParseResult geminiResult = null;
         try {
@@ -109,7 +124,7 @@ public class AiAssistantService {
             log.error("Gemini Agent parse failed: {}", t.getMessage());
         }
 
-        // 5. Handle Rate Limiting
+        // Bước 5: Kiểm tra giới hạn tần suất gọi AI
         if (geminiResult != null && geminiResult.isRateLimited) {
             AiAssistantResponse resp = AiAssistantResponse.builder()
                         .intent("AI_BUSY")
@@ -119,13 +134,13 @@ public class AiAssistantService {
             return resp;
         }
 
-        // 6. Intent Detection (Simplified to Gemini only)
+        // Bước 6: Xác định Ý định (Intent) từ kết quả AI
         IntentResult intentResult = detectIntent(geminiResult, request.getBase64Image() != null);
 
-        // 7. State Management & Transitions
+        // Bước 7: Quản lý chuyển đổi trạng thái (Xóa trạng thái cũ nếu có ý định mới hoàn toàn)
         handleStateTransitions(conversationId, intentResult);
 
-        // 8. Route to Handler
+        // Bước 8: Tìm và gọi Handler tương ứng
         Intent intent = intentResult.getIntent();
         IntentHandler handler = handlerMap.get(intent);
         if (handler == null) {
@@ -135,16 +150,19 @@ public class AiAssistantService {
         AiAssistantResponse response = handler.handle(request, parsed, intentResult, geminiResult, history);
         response.setConversationId(conversationId);
         
-        // 9. Finalize (Save Messages)
+        // Bước 9: Hoàn thiện (Lưu tin nhắn vào DB lịch sử)
         return finalizeResponse(response, conversationId, message, imagePath, request.getUserId());
     }
 
+    /**
+     * Xác định Intent dựa trên kết quả trả về từ Gemini hoặc logic mặc định khi có ảnh.
+     */
     private IntentResult detectIntent(GeminiParseResult gemini, boolean hasImage) {
         if (gemini != null && gemini.intent != null && !"UNKNOWN".equalsIgnoreCase(gemini.intent)) {
             return mapGeminiIntent(gemini.intent);
         }
         
-        // If Gemini failed but we have an image, default to INSERT (likely a receipt)
+        // Nếu AI không nhận diện được nhưng có ảnh, mặc định là INSERT (có thể là hóa đơn)
         if (hasImage) {
             return IntentResult.builder().intent(Intent.INSERT_TRANSACTION).confidence(0.7).source(IntentResult.Source.GEMINI).build();
         }
@@ -152,16 +170,22 @@ public class AiAssistantService {
         return IntentResult.builder().intent(Intent.UNKNOWN).confidence(0.0).source(IntentResult.Source.GEMINI).build();
     }
 
+    /**
+     * Xóa các trạng thái thừa (như bản nháp đang nhập dở) khi người dùng chuyển sang ý định khác.
+     */
     private void handleStateTransitions(String conversationId, IntentResult intentResult) {
         if (intentResult.getConfidence() >= 0.8 && intentResult.getIntent() != Intent.INSERT_TRANSACTION && intentResult.getIntent() != Intent.UNKNOWN) {
             stateService.clearAllStates(conversationId);
         }
     }
 
+    /**
+     * Lưu tin nhắn của User và Server vào DB để làm dữ liệu ngữ cảnh cho tương lai.
+     */
     private AiAssistantResponse finalizeResponse(AiAssistantResponse response, String conversationId, String userMsg, String imagePath, Long userId) {
         if (response.getIntent() == null) response.setIntent("UNKNOWN");
         
-        // Save User Message
+        // Lưu tin nhắn User
         AiMessage userAiMsg = AiMessage.builder()
                 .conversationId(conversationId)
                 .role("USER")
@@ -171,7 +195,7 @@ public class AiAssistantService {
                 .build();
         aiMessageRepository.save(userAiMsg);
 
-        // Save Assistant Message
+        // Lưu phản hồi của Assistant
         AiMessage assistantAiMsg = AiMessage.builder()
                 .conversationId(conversationId)
                 .role("ASSISTANT")
@@ -183,6 +207,9 @@ public class AiAssistantService {
         return response;
     }
 
+    /**
+     * Ánh xạ chuỗi định danh Intent từ Gemini sang Enum nội bộ.
+     */
     private IntentResult mapGeminiIntent(String intentStr) {
         Intent intent = switch (intentStr.toUpperCase()) {
             case "INSERT", "INSERT_TRANSACTION" -> Intent.INSERT_TRANSACTION;
@@ -208,26 +235,32 @@ public class AiAssistantService {
         return IntentResult.builder().intent(intent).confidence(1.0).source(IntentResult.Source.GEMINI).build();
     }
 
+    /**
+     * Lấy toàn bộ lịch sử nhắn tin của một người dùng.
+     */
     public List<AiMessage> getHistory(Long userId) {
         return aiMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
     }
 
+    /**
+     * Xóa sạch lịch sử chat và các file ảnh liên quan của người dùng.
+     */
     @Transactional
     public void clearHistory(Long userId) {
         log.info("Clearing AI history for user: {}", userId);
         List<AiMessage> messages = aiMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
         
-        // Delete each associated image file from local storage
+        // Xóa từng file ảnh vật lý trên bộ nhớ
         for (AiMessage m : messages) {
             if (m.getImageUrl() != null && !m.getImageUrl().isBlank()) {
                 fileStorageService.deleteFile(m.getImageUrl());
             }
         }
         
-        // Delete all message records from database
+        // Xóa các bản ghi tin nhắn trong DB
         aiMessageRepository.deleteAll(messages);
         
-        // Clear in-memory conversation states (Drafts, Plans, etc.)
+        // Xóa các trạng thái trong bộ nhớ (Drafts, Plans...)
         messages.stream()
                 .map(AiMessage::getConversationId)
                 .filter(Objects::nonNull)
@@ -235,6 +268,9 @@ public class AiAssistantService {
                 .forEach(stateService::clearAllStates);
     }
 
+    /**
+     * Cập nhật API Key cá nhân.
+     */
     @Transactional
     public void saveCustomApiKey(Long userId, String apiKey) {
         userRepository.findById(userId).ifPresent(u -> {
@@ -243,6 +279,9 @@ public class AiAssistantService {
         });
     }
 
+    /**
+     * Xóa API Key cá nhân.
+     */
     @Transactional
     public void deleteCustomApiKey(Long userId) {
         userRepository.findById(userId).ifPresent(u -> {
@@ -251,6 +290,9 @@ public class AiAssistantService {
         });
     }
 
+    /**
+     * Kiểm tra sự tồn tại của API Key cá nhân.
+     */
     public boolean hasCustomApiKey(Long userId) {
         return userRepository.findById(userId)
                 .map(u -> u.getGeminiApiKey() != null && !u.getGeminiApiKey().isBlank())
