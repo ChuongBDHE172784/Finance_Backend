@@ -1,7 +1,6 @@
 package com.example.finance_backend.service.assistant.intent;
 
 import com.example.finance_backend.dto.*;
-import com.example.finance_backend.dto.IntentResult.Intent;
 import com.example.finance_backend.entity.AiMessage;
 import com.example.finance_backend.entity.EntryType;
 import com.example.finance_backend.repository.AccountRepository;
@@ -39,11 +38,13 @@ public abstract class BaseIntentHandler implements IntentHandler {
 
     protected Map<String, Long> getNameToIdMap() {
         return categoryService.findAll().stream()
-                .collect(Collectors.toMap(c -> textPreprocessor.normalizeVietnamese(c.getName()), c -> c.getId(), (a, b) -> a));
+                .collect(Collectors.toMap(c -> textPreprocessor.normalizeVietnamese(c.getName()), c -> c.getId(),
+                        (a, b) -> a));
     }
 
     protected Long resolveCategoryId(Map<String, Long> nameToId, String name, Long fallbackId) {
-        if (name == null || name.isBlank()) return fallbackId;
+        if (name == null || name.isBlank())
+            return fallbackId;
         String norm = textPreprocessor.normalizeVietnamese(name);
         return nameToId.getOrDefault(norm, fallbackId);
     }
@@ -61,8 +62,10 @@ public abstract class BaseIntentHandler implements IntentHandler {
     }
 
     protected AccountResolution resolveAccount(String message, Long defaultAccountId, Long userId, String language) {
-        // Logic resolution account... (omitted for brevity, keep as is if possible or implement simply)
-        if (defaultAccountId != null) return new AccountResolution(defaultAccountId, false, null);
+        // Logic resolution account... (omitted for brevity, keep as is if possible or
+        // implement simply)
+        if (defaultAccountId != null)
+            return new AccountResolution(defaultAccountId, false, null);
         return new AccountResolution(null, true, null);
     }
 
@@ -70,8 +73,11 @@ public abstract class BaseIntentHandler implements IntentHandler {
         public Long accountId;
         public boolean needsSelection;
         public String errorMessage;
+
         public AccountResolution(Long id, boolean needs, String err) {
-            this.accountId = id; this.needsSelection = needs; this.errorMessage = err;
+            this.accountId = id;
+            this.needsSelection = needs;
+            this.errorMessage = err;
         }
     }
 }

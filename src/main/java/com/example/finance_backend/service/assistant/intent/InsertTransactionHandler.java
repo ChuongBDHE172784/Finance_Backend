@@ -3,7 +3,6 @@ package com.example.finance_backend.service.assistant.intent;
 import com.example.finance_backend.dto.*;
 import com.example.finance_backend.dto.IntentResult.Intent;
 import com.example.finance_backend.entity.AiMessage;
-import com.example.finance_backend.entity.FinancialEntry;
 import com.example.finance_backend.repository.AccountRepository;
 import com.example.finance_backend.repository.CategoryRepository;
 import com.example.finance_backend.service.CategoryService;
@@ -43,7 +42,8 @@ public class InsertTransactionHandler extends BaseIntentHandler {
             FinancialEntryService entryService,
             ConversationStateService stateService,
             EntityExtractor entityExtractor) {
-        super(categoryService, accountRepository, categoryRepository, textPreprocessor, responseGenerator, dateParser, keywordCleaner);
+        super(categoryService, accountRepository, categoryRepository, textPreprocessor, responseGenerator, dateParser,
+                keywordCleaner);
         this.entryService = entryService;
         this.stateService = stateService;
         this.entityExtractor = entityExtractor;
@@ -55,7 +55,8 @@ public class InsertTransactionHandler extends BaseIntentHandler {
     }
 
     @Override
-    public AiAssistantResponse handle(AiAssistantRequest request, ParsedMessage parsed, IntentResult intentResult, GeminiParseResult gemini, List<AiMessage> history) {
+    public AiAssistantResponse handle(AiAssistantRequest request, ParsedMessage parsed, IntentResult intentResult,
+            GeminiParseResult gemini, List<AiMessage> history) {
         String originalMessage = parsed.getOriginalText();
         String language = request.getLanguage();
         Long userId = request.getUserId();
@@ -91,7 +92,8 @@ public class InsertTransactionHandler extends BaseIntentHandler {
         List<GeminiParsedEntry> previousDrafts = stateService.extractDraftEntriesFromHistory(history);
         if (!previousDrafts.isEmpty()) {
             for (GeminiParsedEntry prev : previousDrafts) {
-                // Nếu bản nháp mới đã có một mục cho cùng sản phẩm/dịch vụ này (cùng danh mục và nội dung),
+                // Nếu bản nháp mới đã có một mục cho cùng sản phẩm/dịch vụ này (cùng danh mục
+                // và nội dung),
                 // chúng ta coi bản mới là nguồn sự thật (có thể là một bản cập nhật).
                 // Chỉ thêm từ lịch sử nếu không có sự trùng lặp về nhận diện.
                 boolean exists = draftEntries.stream().anyMatch(curr -> isSameIdentity(curr, prev));
@@ -134,17 +136,19 @@ public class InsertTransactionHandler extends BaseIntentHandler {
                     .reply(responseGenerator.needAccountSelection(language))
                     .build();
         }
-        
+
         Long accountId = acctRes.accountId;
         // ... (phần còn lại của logic lưu từ AiAssistantService)
         return processSaving(draftEntries, accountId, userId, language, originalMessage);
     }
 
-    private AiAssistantResponse processSaving(List<GeminiParsedEntry> draftEntries, Long accountId, Long userId, String language, String originalMessage) {
+    private AiAssistantResponse processSaving(List<GeminiParsedEntry> draftEntries, Long accountId, Long userId,
+            String language, String originalMessage) {
         Map<String, Long> nameToId = getNameToIdMap();
         Long fallbackCategoryId = resolveFallbackCategoryId(nameToId);
         if (fallbackCategoryId == null) {
-            return AiAssistantResponse.builder().intent("INSERT").reply(responseGenerator.noCategories(language)).build();
+            return AiAssistantResponse.builder().intent("INSERT").reply(responseGenerator.noCategories(language))
+                    .build();
         }
         Long incomeCategoryId = resolveCategoryId(nameToId, "Nạp tiền", fallbackCategoryId);
 
@@ -156,17 +160,21 @@ public class InsertTransactionHandler extends BaseIntentHandler {
             if (slot == null || slot.getAmount() == null || slot.getAmount().compareTo(BigDecimal.ZERO) <= 0)
                 continue;
 
-            String type = slot.getType() == null || slot.getType().isBlank() ? "EXPENSE" : slot.getType().toUpperCase(Locale.ROOT);
-            if (!"EXPENSE".equals(type) && !"INCOME".equals(type)) type = "EXPENSE";
+            String type = slot.getType() == null || slot.getType().isBlank() ? "EXPENSE"
+                    : slot.getType().toUpperCase(Locale.ROOT);
+            if (!"EXPENSE".equals(type) && !"INCOME".equals(type))
+                type = "EXPENSE";
 
             String resolvedCategory = entityExtractor.normalizeCategoryName(slot.getCategoryName());
-            if ("INCOME".equals(type)) resolvedCategory = "Nạp tiền";
-            
+            if ("INCOME".equals(type))
+                resolvedCategory = "Nạp tiền";
+
             Long preferredFallback = "INCOME".equals(type) ? incomeCategoryId : fallbackCategoryId;
             Long categoryId = resolveCategoryId(nameToId, resolvedCategory, preferredFallback);
             LocalDate date = dateParser.parseDate(slot.getDate(), LocalDate.now());
             String note = slot.getNote() != null && !slot.getNote().isBlank() ? slot.getNote().trim() : originalMessage;
-            if (note.length() > 2000) note = note.substring(0, 1997) + "...";
+            if (note.length() > 2000)
+                note = note.substring(0, 1997) + "...";
 
             CreateEntryRequest req = CreateEntryRequest.builder()
                     .amount(slot.getAmount())
@@ -182,7 +190,8 @@ public class InsertTransactionHandler extends BaseIntentHandler {
                 createdCount++;
                 String catName = created.getCategoryName() != null ? created.getCategoryName() : "";
                 String sign = "INCOME".equals(type) ? "+" : "-";
-                savedLines.add(String.format("%s %s • %s", sign, responseGenerator.formatVnd(slot.getAmount(), language), catName));
+                savedLines.add(String.format("%s %s • %s", sign,
+                        responseGenerator.formatVnd(slot.getAmount(), language), catName));
             } catch (Exception ex) {
                 log.error("Failed to create entry: {}", req, ex);
                 errors.add(ex.getMessage());
@@ -190,7 +199,8 @@ public class InsertTransactionHandler extends BaseIntentHandler {
         }
 
         if (createdCount == 0) {
-            String errorText = errors.isEmpty() ? responseGenerator.insertFailed(null, language) : responseGenerator.insertFailed(errors.get(0), language);
+            String errorText = errors.isEmpty() ? responseGenerator.insertFailed(null, language)
+                    : responseGenerator.insertFailed(errors.get(0), language);
             return AiAssistantResponse.builder().intent("INSERT").refreshRequired(false).reply(errorText).build();
         }
 
@@ -203,12 +213,13 @@ public class InsertTransactionHandler extends BaseIntentHandler {
     }
 
     private boolean isSameIdentity(GeminiParsedEntry a, GeminiParsedEntry b) {
-        if (a == null || b == null) return false;
+        if (a == null || b == null)
+            return false;
         String noteA = (a.note != null ? a.note.trim() : "").toLowerCase(Locale.ROOT);
         String noteB = (b.note != null ? b.note.trim() : "").toLowerCase(Locale.ROOT);
         String catA = (a.categoryName != null ? a.categoryName.trim() : "").toLowerCase(Locale.ROOT);
         String catB = (b.categoryName != null ? b.categoryName.trim() : "").toLowerCase(Locale.ROOT);
-        
+
         // 1. Khớp tuyệt đối (Exact Match)
         if (noteA.equals(noteB) && catA.equals(catB)) {
             return true;
@@ -221,7 +232,7 @@ public class InsertTransactionHandler extends BaseIntentHandler {
             List<String> correctionVerbs = List.of("sua", "thay", "doi", "fix", "edit", "change", "correct", "update");
             String normalizedNoteA = textPreprocessor.normalizeVietnamese(noteA);
             boolean isCorrection = correctionVerbs.stream().anyMatch(normalizedNoteA::contains);
-            
+
             if (isCorrection) {
                 // Kiểm tra sự trùng lặp từ khóa giữa note cũ và note mới
                 // Ví dụ: note cũ là "Đi taxi", note mới là "Sửa cái taxi đó" -> chung từ "taxi"
@@ -231,17 +242,18 @@ public class InsertTransactionHandler extends BaseIntentHandler {
                 }
             }
         }
-        
+
         return false;
     }
 
     private Set<String> extractSignificantKeywords(String text) {
-        if (text == null || text.isBlank()) return Collections.emptySet();
+        if (text == null || text.isBlank())
+            return Collections.emptySet();
         String normalized = textPreprocessor.normalizeVietnamese(text).toLowerCase(Locale.ROOT);
         String[] words = normalized.split("\\s+");
         Set<String> keywords = new HashSet<>();
         List<String> stopWords = List.of("cho", "het", "la", "bi", "duoc", "cai", "nay", "vua", "the", "for", "with");
-        
+
         for (String w : words) {
             String cleaned = w.replaceAll("[^a-z0-9]", "");
             if (cleaned.length() >= 3 && !stopWords.contains(cleaned)) {
