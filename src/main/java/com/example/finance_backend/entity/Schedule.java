@@ -46,6 +46,10 @@ public class Schedule {
     @Column(name = "repeat_config", columnDefinition = "TEXT")
     private String repeatConfig; // JSON mapping
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private EntryType type;
+
     @Column(name = "next_run", nullable = false)
     private LocalDateTime nextRun;
 

@@ -25,9 +25,11 @@ public class AiAssistantController {
 
     /**
      * Endpoint chính để tương tác với Trợ lý ảo.
+     * 
      * @param request Chứa tin nhắn văn bản, ảnh (nếu có) và ngôn ngữ.
-     * @param userId ID của người dùng được gửi qua Header.
-     * @return Phản hồi của AI bao gồm nội dung trả lời và ý định (intent) được phân tích.
+     * @param userId  ID của người dùng được gửi qua Header.
+     * @return Phản hồi của AI bao gồm nội dung trả lời và ý định (intent) được phân
+     *         tích.
      */
     @PostMapping("/assistant")
     public ResponseEntity<AiAssistantResponse> assistant(
@@ -39,6 +41,7 @@ public class AiAssistantController {
 
     /**
      * Lấy lịch sử tất cả các tin nhắn chat của người dùng.
+     * 
      * @param userId ID của người dùng.
      * @return Danh sách các tin nhắn đã gửi và nhận trước đó.
      */
@@ -50,6 +53,7 @@ public class AiAssistantController {
 
     /**
      * Xóa sạch lịch sử chat của người dùng.
+     * 
      * @param userId ID của người dùng.
      */
     @DeleteMapping("/history")

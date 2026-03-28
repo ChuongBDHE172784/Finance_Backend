@@ -23,6 +23,7 @@ public class ScheduleDTO {
     private LocalDateTime startDate;
     private RepeatType repeatType;
     private String repeatConfig; // JSON mapping
+    private com.example.finance_backend.entity.EntryType type;
     private LocalDateTime nextRun;
     private Boolean isActive;
     private LocalDateTime createdAt;

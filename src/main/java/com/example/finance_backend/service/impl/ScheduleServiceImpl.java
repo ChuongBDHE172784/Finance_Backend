@@ -47,6 +47,7 @@ public class ScheduleServiceImpl implements ScheduleService {
         existing.setCategoryId(dto.getCategoryId());
         existing.setAccountId(dto.getAccountId());
         existing.setIsActive(dto.getIsActive());
+        existing.setType(dto.getType());
         
         // Recalculate next run if modifying repeat logic
         if (dto.getNextRun() != null) {
@@ -178,6 +179,7 @@ public class ScheduleServiceImpl implements ScheduleService {
                 .startDate(dto.getStartDate())
                 .repeatType(dto.getRepeatType())
                 .repeatConfig(dto.getRepeatConfig())
+                .type(dto.getType())
                 .nextRun(dto.getNextRun())
                 .isActive(dto.getIsActive() != null ? dto.getIsActive() : true)
                 .build();
@@ -194,6 +196,7 @@ public class ScheduleServiceImpl implements ScheduleService {
                 .startDate(schedule.getStartDate())
                 .repeatType(schedule.getRepeatType())
                 .repeatConfig(schedule.getRepeatConfig())
+                .type(schedule.getType())
                 .nextRun(schedule.getNextRun())
                 .isActive(schedule.getIsActive())
                 .createdAt(schedule.getCreatedAt())
